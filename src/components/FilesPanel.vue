@@ -304,8 +304,8 @@ function onReferenceItem(item) {
     </div>
   </div>
 
-  <!-- Search input -->
-  <div class="files-filter-form">
+  <!-- Search input (hidden when a file is open) -->
+  <div v-if="!openedFile" class="files-filter-form">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
       <circle cx="11" cy="11" r="8"/>
       <path d="m21 21-4.35-4.35"/>

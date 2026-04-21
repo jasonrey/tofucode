@@ -13,19 +13,29 @@ const emit = defineEmits(['answer-question']);
 const resultExpanded = ref(false);
 const finalResultExpanded = ref(false);
 const copySuccess = ref(false);
-const userContentRef = ref(null);
 
 async function copyMessageContent() {
-  let content;
-  if (props.message.type === 'user' && userContentRef.value) {
-    // Use innerText from the rendered DOM — avoids non-breaking spaces and
-    // other contenteditable artifacts that can corrupt pasted format.
-    content = (userContentRef.value.innerText || '').trim();
-  } else {
-    content = props.message.content || '';
-  }
+  const rawContent = (props.message.content || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
   try {
-    await navigator.clipboard.writeText(content);
+    if (props.message.type === 'user' && typeof ClipboardItem !== 'undefined') {
+      // Write both formats so paste targets get the best match:
+      // - text/html → rich targets (Slack, Notion, Docs) get proper paragraph breaks and formatting
+      // - text/plain → plain targets (terminals, editors) get raw markdown with syntax intact
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([renderedUserContent.value], {
+            type: 'text/html',
+          }),
+          'text/plain': new Blob([rawContent], { type: 'text/plain' }),
+        }),
+      ]);
+    } else {
+      await navigator.clipboard.writeText(rawContent);
+    }
     copySuccess.value = true;
     setTimeout(() => {
       copySuccess.value = false;
@@ -239,7 +249,7 @@ function togglePlanExpand() {
   <div class="message" :class="messageType">
     <!-- User message -->
     <div v-if="messageType === 'user'" class="user-message" :class="userPermissionMode ? 'permission-' + userPermissionMode : 'permission-default'">
-      <div ref="userContentRef" class="content markdown-body" v-html="renderedUserContent"></div>
+      <div class="content markdown-body" v-html="renderedUserContent"></div>
       <div class="message-footer">
         <span class="timestamp" v-if="formattedTimestamp" :title="fullTimestamp">{{ formattedTimestamp }}</span>
         <button class="msg-copy-btn" :class="{ copied: copySuccess }" @click="copyMessageContent" title="Copy message">
