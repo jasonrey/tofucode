@@ -2316,7 +2316,7 @@ watch(
           <span
             class="toolbar-item branch"
             :class="[{ clickable: fileChangesText }, branchColorClass]"
-            v-if="projectStatus.gitBranch"
+            v-if="projectStatus.gitBranch && !openedFile"
             @click="openGitDiffModal"
             :title="`${projectStatus.gitBranch}${fileChangesText ? ' - Click to view changes' : ''}`"
           >
@@ -2329,7 +2329,7 @@ watch(
             <span class="branch-name">{{ projectStatus.gitBranch }}</span>
             <span class="git-changes" v-if="fileChangesText">{{ fileChangesText }}</span>
           </span>
-          <span class="toolbar-item no-git" v-else-if="projectStatus.cwd">
+          <span class="toolbar-item no-git" v-else-if="projectStatus.cwd && !openedFile">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/>
               <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
