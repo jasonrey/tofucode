@@ -1,7 +1,9 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
+import { getFilePathFromToolUse } from '../utils/format.js';
 import MessageItem from './MessageItem.vue';
 import ToolGroup from './ToolGroup.vue';
+import TurnFilesSummary from './TurnFilesSummary.vue';
 
 const props = defineProps({
   messages: {
@@ -62,6 +64,23 @@ const STANDALONE_TOOLS = new Set([
   'EnterPlanMode',
   'AskUserQuestion',
 ]);
+
+// Derive unique files touched in a turn's responses for the summary
+function deriveFilesTouched(responses) {
+  const map = new Map(); // path -> { path, ops: Set, count }
+  for (const msg of responses) {
+    const f = getFilePathFromToolUse(msg);
+    if (!f) continue;
+    const entry = map.get(f.path) ?? { path: f.path, ops: new Set(), count: 0 };
+    entry.ops.add(f.op);
+    entry.count += 1;
+    map.set(f.path, entry);
+  }
+  return Array.from(map.values()).map((e) => ({
+    ...e,
+    ops: Array.from(e.ops),
+  }));
+}
 
 // Group consecutive tool_use and tool_result messages together
 function groupToolMessages(messages) {
@@ -141,6 +160,7 @@ const conversationTurns = computed(() => {
   return turns.map((turn) => ({
     ...turn,
     groupedResponses: groupToolMessages(turn.responses),
+    filesTouched: deriveFilesTouched(turn.responses),
   }));
 });
 
@@ -435,6 +455,8 @@ defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
             <ToolGroup v-if="msg.type === 'tool_group'" :items="msg.items" />
             <MessageItem v-else :message="msg" @answer-question="emit('answer-question', $event)" />
           </template>
+          <!-- Files touched summary (collapsed, shown when turn has any file ops) -->
+          <TurnFilesSummary v-if="turn.filesTouched.length > 0" :files="turn.filesTouched" />
         </div>
       </div>
       <div class="empty" v-else-if="!isRunning && (isNewSession || contextReady)">

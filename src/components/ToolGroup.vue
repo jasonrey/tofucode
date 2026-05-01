@@ -1,8 +1,20 @@
 <script setup>
 import * as Diff from 'diff';
 import { computed, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { formatToolCompact } from '../utils/format.js';
 import DiffViewer from './DiffViewer.vue';
+
+const route = useRoute();
+const router = useRouter();
+
+function openInFiles(path) {
+  router.push({
+    name: 'chat',
+    params: route.params,
+    query: { ...route.query, mode: 'files', file: path },
+  });
+}
 
 const props = defineProps({
   items: Array,
@@ -170,7 +182,14 @@ function getDiffStats(item) {
 
           <div class="tool-use-content">
             <code v-if="formatTool(item).type === 'command'" class="tool-command">{{ truncate(formatTool(item).primary, 200) }}</code>
-            <code v-else-if="formatTool(item).type === 'path'" class="tool-path">{{ formatTool(item).primary }}</code>
+            <div v-else-if="formatTool(item).type === 'path'" class="tool-path-row">
+              <code class="tool-path">{{ formatTool(item).primary }}</code>
+              <button class="tool-file-link" @click.stop="openInFiles(formatTool(item).primary)" title="Open in Files tab">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
+                </svg>
+              </button>
+            </div>
             <code v-else-if="formatTool(item).type === 'pattern'" class="tool-pattern">{{ formatTool(item).primary }}</code>
             <span v-else class="tool-text">{{ formatTool(item).primary }}</span>
           </div>
@@ -382,11 +401,36 @@ function getDiffStats(item) {
   word-break: break-all;
 }
 
+.tool-path-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .tool-path {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);
   word-break: break-all;
+  flex: 1;
+}
+
+.tool-file-link {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+
+.tool-file-link:hover {
+  opacity: 1;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
 .tool-pattern {
