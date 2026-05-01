@@ -2311,7 +2311,7 @@ watch(
       </div>
 
       <!-- Toolbar -->
-      <div class="toolbar">
+      <div v-if="!(filesMode && openedFile)" class="toolbar">
         <div class="toolbar-left">
           <span
             class="toolbar-item branch"
