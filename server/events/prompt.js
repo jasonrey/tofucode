@@ -139,19 +139,15 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
   }
 
   // Determine permission mode
-  // Valid modes: 'default', 'acceptEdits', 'bypassPermissions', 'plan', 'delegate', 'dontAsk'
+  // Valid modes: 'default', 'bypassPermissions', 'plan'
   let permissionMode = config.permissionMode;
-  // allowDangerouslySkipPermissions must be true whenever permissionMode is 'bypassPermissions'
   let allowDangerouslySkipPermissions = permissionMode === 'bypassPermissions';
 
   if (options.dangerouslySkipPermissions) {
     permissionMode = 'bypassPermissions';
     allowDangerouslySkipPermissions = true;
-  } else if (options.permissionMode === 'bypassPermissions') {
-    permissionMode = 'bypassPermissions';
-    allowDangerouslySkipPermissions = true;
-  } else if (options.permissionMode === 'acceptEdits') {
-    permissionMode = 'acceptEdits';
+  } else if (options.permissionMode === 'plan') {
+    permissionMode = 'plan';
     allowDangerouslySkipPermissions = false;
   } else if (options.permissionMode === 'default') {
     permissionMode = 'default';

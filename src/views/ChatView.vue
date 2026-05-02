@@ -470,10 +470,10 @@ function handleKeydown(e) {
       return;
     }
 
-    // Cmd+\: Cycle permission mode (default → plan → bypass → skip → default)
+    // Cmd+\: Cycle permission mode (default → plan → skip → default)
     if (e.key === '\\') {
       e.preventDefault();
-      const modes = ['default', 'plan', 'bypass', 'skip'];
+      const modes = ['default', 'plan', 'skip'];
       const idx = modes.indexOf(permissionMode.value);
       permissionMode.value = modes[(idx + 1) % modes.length];
       return;
@@ -1310,8 +1310,6 @@ function handleSubmit() {
   };
   if (permissionMode.value === 'skip') {
     options.dangerouslySkipPermissions = true;
-  } else if (permissionMode.value === 'bypass') {
-    options.permissionMode = 'acceptEdits';
   } else if (permissionMode.value === 'plan') {
     options.permissionMode = 'plan';
   } else {
@@ -2546,17 +2544,6 @@ watch(
                 </svg>
               </button>
               <button
-                class="permission-tab bypass"
-                :class="{ active: permissionMode === 'bypass' }"
-                @click="permissionMode = 'bypass'"
-                title="Accept Edits - Auto-approve file edits, block bash"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
-                </svg>
-              </button>
-              <button
                 class="permission-tab skip"
                 :class="{ active: permissionMode === 'skip' }"
                 @click="permissionMode = 'skip'"
@@ -2641,7 +2628,7 @@ watch(
                 @click="togglePicker('mode')"
                 title="Permission mode"
               >
-                {{ { default: 'def', plan: 'pln', bypass: 'edt', skip: 'skip' }[permissionMode] }}
+                {{ { default: 'def', plan: 'plan', skip: 'skip' }[permissionMode] }}
               </button>
               <div v-if="openPicker === 'mode'" class="mobile-picker-dropdown">
                 <button
@@ -2654,11 +2641,6 @@ watch(
                   :class="{ active: permissionMode === 'plan' }"
                   @click="permissionMode = 'plan'; closePickers()"
                 >pln <span>Plan</span></button>
-                <button
-                  class="mobile-picker-opt mobile-mode-bypass"
-                  :class="{ active: permissionMode === 'bypass' }"
-                  @click="permissionMode = 'bypass'; closePickers()"
-                >edt <span>Accept Edits</span></button>
                 <button
                   class="mobile-picker-opt mobile-mode-skip"
                   :class="{ active: permissionMode === 'skip' }"
@@ -3757,15 +3739,12 @@ watch(
 
 /* Mode colors in mobile picker */
 .mobile-picker-btn.mobile-mode-plan { color: var(--success-color); border-color: rgba(34, 197, 94, 0.4); }
-.mobile-picker-btn.mobile-mode-bypass { color: #eab308; border-color: rgba(234, 179, 8, 0.4); }
 .mobile-picker-btn.mobile-mode-skip { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
 
 .mobile-picker-opt.mobile-mode-plan { color: var(--success-color); }
-.mobile-picker-opt.mobile-mode-bypass { color: #eab308; }
 .mobile-picker-opt.mobile-mode-skip { color: #f87171; }
 
 .mobile-picker-opt.mobile-mode-plan.active { background: rgba(34, 197, 94, 0.15); }
-.mobile-picker-opt.mobile-mode-bypass.active { background: rgba(234, 179, 8, 0.15); }
 .mobile-picker-opt.mobile-mode-skip.active { background: rgba(248, 113, 113, 0.15); }
 
 
@@ -3853,17 +3832,6 @@ watch(
 .permission-tab.plan.active {
   color: var(--success-color);
   background: rgba(34, 197, 94, 0.15);
-}
-
-/* Accept edits mode - yellow */
-.permission-tab.bypass:hover {
-  color: #eab308;
-  background: rgba(234, 179, 8, 0.1);
-}
-
-.permission-tab.bypass.active {
-  color: #eab308;
-  background: rgba(234, 179, 8, 0.15);
 }
 
 /* Skip mode - light red/danger */
@@ -4194,10 +4162,6 @@ watch(
   border-color: var(--success-color);
 }
 
-.input-form.permission-bypass {
-  border-color: #eab308; /* yellow - accept edits */
-}
-
 .input-form.permission-skip {
   border-color: #f87171; /* light red */
 }
@@ -4239,10 +4203,6 @@ watch(
 
 .input-form.permission-plan .chat-prompt {
   color: var(--success-color);
-}
-
-.input-form.permission-bypass .chat-prompt {
-  color: #eab308; /* yellow - accept edits */
 }
 
 .input-form.permission-skip .chat-prompt {

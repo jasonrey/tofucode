@@ -95,25 +95,18 @@ const userEffort = computed(() => {
 const MODE_LABELS = {
   default: 'default',
   plan: 'plan',
-  acceptEdits: 'edits',
-  bypassPermissions: 'edits',
   skip: 'skip',
 };
 
 // Permission hint for error messages (shown when blocked in restrictive modes)
 const isPermissionError = computed(() => {
   if (props.message.type !== 'error') return false;
-  const mode = props.message.permissionMode;
-  return mode === 'default' || mode === 'acceptEdits';
+  return props.message.permissionMode === 'default';
 });
 
 const permissionErrorHint = computed(() => {
   if (!isPermissionError.value) return '';
-  const mode = props.message.permissionMode;
-  if (mode === 'default') {
-    return 'you are in default mode - switch to accept edits or bypass to allow this';
-  }
-  return 'you are in accept edits mode - switch to bypass to allow bash commands';
+  return 'you are in default mode - switch to skip to allow this';
 });
 
 // Model used for assistant messages (text and tool_use)
@@ -144,12 +137,6 @@ const permissionIcon = computed(() => {
       <line x1="16" y1="13" x2="8" y2="13"/>
       <line x1="16" y1="17" x2="8" y2="17"/>
       <polyline points="10 9 9 9 8 9"/>
-    </svg>`;
-  }
-  if (mode === 'acceptEdits' || mode === 'bypassPermissions') {
-    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-      <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
     </svg>`;
   }
   if (mode === 'skip') {
@@ -460,12 +447,6 @@ function togglePlanExpand() {
   background: rgba(34, 197, 94, 0.06);
 }
 
-.user-message.permission-acceptEdits,
-.user-message.permission-bypassPermissions {
-  border-right-color: #eab308;
-  background: rgba(234, 179, 8, 0.06);
-}
-
 .user-message.permission-skip {
   border-right-color: #f87171;
   background: rgba(248, 113, 113, 0.06);
@@ -591,13 +572,6 @@ function togglePlanExpand() {
   color: var(--success-color);
   border-color: rgba(34, 197, 94, 0.3);
   background: rgba(34, 197, 94, 0.08);
-}
-
-.mode-badge-acceptEdits,
-.mode-badge-bypassPermissions {
-  color: #eab308;
-  border-color: rgba(234, 179, 8, 0.3);
-  background: rgba(234, 179, 8, 0.08);
 }
 
 .mode-badge-skip {
