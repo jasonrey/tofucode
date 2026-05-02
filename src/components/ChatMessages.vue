@@ -48,6 +48,7 @@ const emit = defineEmits([
   'load-full-history',
   'load-older-messages',
   'answer-question',
+  'rewind',
 ]);
 
 const messagesEl = ref(null);
@@ -418,6 +419,16 @@ watch(
   { immediate: true },
 );
 
+// Rewind: emit keepGlobalTurns to parent (ChatView sends WS event)
+function handleRewind(localTurnIndex) {
+  // keepGlobalTurns = how many user turns to keep (0-based from start of full JSONL)
+  // = offset of loaded turns + local index
+  const offset =
+    (props.totalTurns || props.loadedTurns) - (props.loadedTurns || 0);
+  const keepGlobalTurns = offset + localTurnIndex;
+  emit('rewind', keepGlobalTurns);
+}
+
 // Expose scrollToBottom, navigation functions, and navState for parent footer nav bar
 defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
 </script>
@@ -449,7 +460,12 @@ defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
           class="conversation-turn"
         >
           <!-- User message -->
-          <MessageItem v-if="turn.userMessage" :message="turn.userMessage" />
+          <MessageItem
+            v-if="turn.userMessage"
+            :message="turn.userMessage"
+            :rewindable="!isRunning && turnIndex < conversationTurns.length - 1"
+            @rewind="handleRewind(turnIndex)"
+          />
           <!-- Grouped responses (text, tool groups, results, errors) -->
           <template v-for="(msg, msgIndex) in turn.groupedResponses" :key="`${turnIndex}-${msgIndex}`">
             <ToolGroup v-if="msg.type === 'tool_group'" :items="msg.items" />

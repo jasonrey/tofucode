@@ -52,6 +52,10 @@ import {
   getHandler as queueGet,
 } from './queue.js';
 import { handleRestart } from './restart.js';
+import {
+  handler as rewindSession,
+  undoHandler as rewindSessionUndo,
+} from './rewind-session.js';
 import { handleFilesSearch } from './search-files.js';
 import { handler as selectProject } from './select-project.js';
 import { handler as selectSession } from './select-session.js';
@@ -122,6 +126,8 @@ export const handlers = {
   'ports:list': handlePortsList,
   'ports:kill': handlePortsKill,
   restart: handleRestart,
+  rewind_session: rewindSession,
+  'rewind_session:undo': rewindSessionUndo,
   upgrade: handleUpgrade,
   get_git_diff: getGitDiff,
   git_clone: gitClone,

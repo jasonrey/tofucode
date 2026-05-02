@@ -1078,6 +1078,15 @@ export function useChatWebSocket() {
         }
         break;
 
+      case 'rewind_session:result':
+        if (msg.sessionId === currentSession.value) {
+          messages.value = msg.messages || [];
+          hasOlderMessages.value = false;
+          totalTurns.value = msg.totalTurns || 0;
+          loadedTurns.value = msg.loadedTurns || 0;
+        }
+        break;
+
       case 'older_messages':
         // Prepend older messages to the beginning of the array
         if (msg.sessionId === currentSession.value) {
@@ -1390,6 +1399,14 @@ export function useChatWebSocket() {
     messages.value = [];
   }
 
+  function rewindSession(sessionId, keepGlobalTurns) {
+    send({ type: 'rewind_session', sessionId, keepGlobalTurns });
+  }
+
+  function rewindSessionUndo(sessionId) {
+    send({ type: 'rewind_session:undo', sessionId });
+  }
+
   // Terminal actions
   function execCommand(command, cwd) {
     send({ type: 'terminal:exec', command, cwd });
@@ -1519,6 +1536,10 @@ export function useChatWebSocket() {
     // Queue actions
     deleteQueuedMessage,
     clearQueuedMessages,
+
+    // Session rewind
+    rewindSession,
+    rewindSessionUndo,
 
     // Direct send
     send,

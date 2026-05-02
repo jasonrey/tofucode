@@ -6,13 +6,18 @@ import DiffViewer from './DiffViewer.vue';
 
 const props = defineProps({
   message: Object,
+  rewindable: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(['answer-question']);
+const emit = defineEmits(['answer-question', 'rewind']);
 
 const resultExpanded = ref(false);
 const finalResultExpanded = ref(false);
 const copySuccess = ref(false);
+const rewindConfirm = ref(false);
 
 async function copyMessageContent() {
   const rawContent = (props.message.content || '')
@@ -265,6 +270,20 @@ function togglePlanExpand() {
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
+        <!-- Rewind: confirm strip or button -->
+        <template v-if="rewindable">
+          <div v-if="rewindConfirm" class="rewind-confirm" @click.stop>
+            <span class="rewind-confirm-text">rewind from here? file changes stay</span>
+            <button class="rewind-confirm-yes" @click="emit('rewind'); rewindConfirm = false">yes</button>
+            <button class="rewind-confirm-cancel" @click="rewindConfirm = false">×</button>
+          </div>
+          <button v-else class="msg-rewind-btn" @click.stop="rewindConfirm = true" title="Rewind to here — remove this turn and everything after it">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+          </button>
+        </template>
         <span
           class="mode-badge"
           :class="'mode-badge-' + (userPermissionMode || 'default')"
@@ -502,6 +521,73 @@ function togglePlanExpand() {
 .user-message:hover .msg-copy-btn,
 .text-message:hover .msg-copy-btn {
   opacity: 1;
+}
+
+/* Rewind button */
+.msg-rewind-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.msg-rewind-btn:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.user-message:hover .msg-rewind-btn {
+  opacity: 1;
+}
+
+/* Rewind inline confirmation strip */
+.rewind-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.rewind-confirm-text {
+  color: var(--text-muted);
+}
+
+.rewind-confirm-yes {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.rewind-confirm-yes:hover {
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.rewind-confirm-cancel {
+  padding: 1px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.rewind-confirm-cancel:hover {
+  color: var(--text-primary);
 }
 
 .model-badge {

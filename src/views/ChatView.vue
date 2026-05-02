@@ -81,6 +81,8 @@ const {
   send,
   sendAndWait,
   onMessage,
+  rewindSession,
+  rewindSessionUndo,
 } = useChatWebSocket();
 
 // Debug mode
@@ -138,6 +140,49 @@ const fm = useFilesManager({
 
 // Convenience aliases for memo logic and URL sync
 const openedFile = fm.openedFile;
+
+// Session rewind undo banner
+const rewindUndo = ref(null); // null | { sessionId, timer }
+const REWIND_UNDO_TTL = 15_000;
+
+function handleRewind(keepGlobalTurns) {
+  if (!currentSession.value) return;
+  rewindSession(currentSession.value, keepGlobalTurns);
+}
+
+function handleRewindUndo() {
+  if (!rewindUndo.value) return;
+  const { sessionId, timer } = rewindUndo.value;
+  clearTimeout(timer);
+  rewindUndo.value = null;
+  rewindSessionUndo(sessionId);
+}
+
+function dismissRewindUndo() {
+  if (!rewindUndo.value) return;
+  clearTimeout(rewindUndo.value.timer);
+  rewindUndo.value = null;
+}
+
+onMessage((msg) => {
+  if (
+    msg.type === 'rewind_session:result' &&
+    msg.sessionId === currentSession.value
+  ) {
+    if (msg.canUndo) {
+      // Clear any existing undo timer
+      if (rewindUndo.value?.timer) clearTimeout(rewindUndo.value.timer);
+      const timer = setTimeout(dismissRewindUndo, REWIND_UNDO_TTL);
+      rewindUndo.value = { sessionId: msg.sessionId, timer };
+    } else {
+      dismissRewindUndo();
+    }
+  }
+  if (msg.type === 'rewind_session:error') {
+    // Could show an error toast here — for now just log
+    console.warn('[rewind]', msg.message);
+  }
+});
 
 // Git Diff Modal
 const showGitDiffModal = ref(false);
@@ -2281,7 +2326,19 @@ watch(
       @load-full-history="loadFullHistory"
       @load-older-messages="loadOlderMessages"
       @answer-question="handleAnswerQuestion"
+      @rewind="handleRewind"
     />
+
+    <!-- Rewind undo banner -->
+    <div v-if="rewindUndo && currentMode === 'chat'" class="rewind-undo-banner">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+        <path d="M3 3v5h5"/>
+      </svg>
+      <span>rewound</span>
+      <button class="rewind-undo-btn" @click="handleRewindUndo">undo</button>
+      <button class="rewind-undo-dismiss" @click="dismissRewindUndo">×</button>
+    </div>
 
     <!-- Terminal Mode -->
     <main v-else-if="currentMode === 'terminal'" class="terminal">
@@ -2628,24 +2685,47 @@ watch(
                 @click="togglePicker('mode')"
                 title="Permission mode"
               >
-                {{ { default: 'def', plan: 'plan', skip: 'skip' }[permissionMode] }}
+                <!-- default: shield -->
+                <svg v-if="permissionMode === 'default'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                <!-- plan: document -->
+                <svg v-else-if="permissionMode === 'plan'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                <!-- skip: lightning bolt -->
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
               </button>
               <div v-if="openPicker === 'mode'" class="mobile-picker-dropdown">
                 <button
                   class="mobile-picker-opt"
                   :class="{ active: permissionMode === 'default' }"
                   @click="permissionMode = 'default'; closePickers()"
-                >def <span>Default</span></button>
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  <span>Default</span>
+                </button>
                 <button
                   class="mobile-picker-opt mobile-mode-plan"
                   :class="{ active: permissionMode === 'plan' }"
                   @click="permissionMode = 'plan'; closePickers()"
-                >pln <span>Plan</span></button>
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  <span>Plan</span>
+                </button>
                 <button
                   class="mobile-picker-opt mobile-mode-skip"
                   :class="{ active: permissionMode === 'skip' }"
                   @click="permissionMode = 'skip'; closePickers()"
-                >skip <span>Skip</span></button>
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <span>Skip</span>
+                </button>
               </div>
             </div>
           </div>
@@ -3728,13 +3808,8 @@ watch(
 }
 
 .mobile-picker-opt span {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-muted);
-}
-
-.mobile-picker-opt.active span {
-  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* Mode colors in mobile picker */
@@ -4570,6 +4645,59 @@ watch(
 
 .modal-btn.danger:hover {
   opacity: 0.9;
+}
+
+/* Rewind undo banner */
+.rewind-undo-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--error-color) 12%, var(--bg-secondary));
+  border-top: 1px solid color-mix(in srgb, var(--error-color) 30%, transparent);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.rewind-undo-banner svg {
+  flex-shrink: 0;
+  color: var(--error-color);
+  opacity: 0.7;
+}
+
+.rewind-undo-banner span {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.rewind-undo-btn {
+  padding: 2px 10px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
+  background: transparent;
+  color: var(--error-color);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.rewind-undo-btn:hover {
+  background: color-mix(in srgb, var(--error-color) 15%, transparent);
+}
+
+.rewind-undo-dismiss {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.rewind-undo-dismiss:hover {
+  opacity: 1;
 }
 
 /* Mobile styles - only icons, no text labels */
