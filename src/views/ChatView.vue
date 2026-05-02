@@ -2107,6 +2107,9 @@ watch(currentSession, () => {
   // Close git diff modal on session change to avoid stale data
   showGitDiffModal.value = false;
 
+  // Dismiss rewind undo banner — belongs to the previous session
+  dismissRewindUndo();
+
   // Don't reinitialize here - the projectStatus.cwd watcher will handle it
   // once the new project status arrives from the server
 });

@@ -463,7 +463,7 @@ defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
           <MessageItem
             v-if="turn.userMessage"
             :message="turn.userMessage"
-            :rewindable="!isRunning && turnIndex < conversationTurns.length - 1"
+            :rewindable="!isRunning && (hasOlderMessages || turnIndex > 0)"
             @rewind="handleRewind(turnIndex)"
           />
           <!-- Grouped responses (text, tool groups, results, errors) -->

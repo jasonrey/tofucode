@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { formatRelativeTime, formatToolDisplay } from '../utils/format.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import DiffViewer from './DiffViewer.vue';
@@ -18,6 +18,14 @@ const resultExpanded = ref(false);
 const finalResultExpanded = ref(false);
 const copySuccess = ref(false);
 const rewindConfirm = ref(false);
+
+// Reset confirm strip if rewindable becomes false (e.g. task starts while confirm is open)
+watch(
+  () => props.rewindable,
+  (val) => {
+    if (!val) rewindConfirm.value = false;
+  },
+);
 
 async function copyMessageContent() {
   const rawContent = (props.message.content || '')
