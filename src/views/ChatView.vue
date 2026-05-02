@@ -1135,12 +1135,17 @@ const BTW_RE = /^btw\s+/i;
 const isBtwMode = computed(() => BTW_RE.test(inputValue.value));
 
 function toggleBtw() {
-  if (isBtwMode.value) {
-    inputValue.value = inputValue.value.replace(BTW_RE, '');
-  } else {
-    inputValue.value = `btw ${inputValue.value}`;
+  const newValue = isBtwMode.value
+    ? inputValue.value.replace(BTW_RE, '')
+    : `btw ${inputValue.value}`;
+  inputValue.value = newValue;
+  if (editorInstance.value) {
+    editorInstance.value.setContent(newValue);
   }
-  nextTick(() => textareaEl.value?.focus());
+  nextTick(() => {
+    const editable = editorEl.value?.querySelector('[contenteditable]');
+    editable?.focus();
+  });
 }
 
 // Effort-based tint intensity for model colors
