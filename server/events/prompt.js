@@ -419,6 +419,8 @@ async function executePrompt(
       if (abortController.signal.aborted) {
         console.log(`Task ${task.id} was cancelled`);
         task.status = 'cancelled';
+        task.stream = null;
+        closeInputQueue();
         broadcastTaskStatus(taskSessionId, {
           type: 'task_status',
           taskId: task.id,

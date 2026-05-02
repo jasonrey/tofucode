@@ -1131,8 +1131,8 @@ watch(modelSelection, (newModel) => {
 loadEffortLevel();
 
 // btw mode — toggled by button or auto-detected when input starts with "btw "
-const isBtwMode = computed(() => BTW_RE.test(inputValue.value));
 const BTW_RE = /^btw\s+/i;
+const isBtwMode = computed(() => BTW_RE.test(inputValue.value));
 
 function toggleBtw() {
   if (isBtwMode.value) {
