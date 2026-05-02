@@ -187,6 +187,29 @@ const TOOL_CONFIG = {
 };
 
 /**
+ * Tools that read/write files and the operation they perform
+ */
+const FILE_TOOL_OPS = {
+  Read: 'read',
+  Write: 'write',
+  Edit: 'edit',
+  NotebookEdit: 'edit',
+};
+
+/**
+ * Extract file path info from a tool_use message if it's a file operation.
+ * @param {object} msg - A message object (any type)
+ * @returns {{ path: string, op: string, tool: string } | null}
+ */
+export function getFilePathFromToolUse(msg) {
+  if (msg?.type !== 'tool_use') return null;
+  const op = FILE_TOOL_OPS[msg.tool];
+  if (!op) return null;
+  const path = msg.input?.file_path || msg.input?.notebook_path;
+  return path ? { path, op, tool: msg.tool } : null;
+}
+
+/**
  * Format tool display information
  * @param {string} tool - Tool name
  * @param {object} input - Tool input parameters
