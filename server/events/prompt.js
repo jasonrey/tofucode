@@ -79,6 +79,7 @@ export async function handler(ws, message, context) {
     if (existingTask.status === 'running') {
       const result = enqueue(context.currentSessionId, message.prompt, {
         model: message.model,
+        effort: message.effort,
         permissionMode: message.permissionMode,
         dangerouslySkipPermissions: message.dangerouslySkipPermissions,
       });
@@ -107,6 +108,7 @@ export async function handler(ws, message, context) {
       dangerouslySkipPermissions: message.dangerouslySkipPermissions,
       permissionMode: message.permissionMode,
       model: message.model,
+      effort: message.effort,
     },
   );
 
@@ -139,7 +141,8 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
   // Determine permission mode
   // Valid modes: 'default', 'acceptEdits', 'bypassPermissions', 'plan', 'delegate', 'dontAsk'
   let permissionMode = config.permissionMode;
-  let allowDangerouslySkipPermissions = false;
+  // allowDangerouslySkipPermissions must be true whenever permissionMode is 'bypassPermissions'
+  let allowDangerouslySkipPermissions = permissionMode === 'bypassPermissions';
 
   if (options.dangerouslySkipPermissions) {
     permissionMode = 'bypassPermissions';
@@ -149,10 +152,13 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
     allowDangerouslySkipPermissions = true;
   } else if (options.permissionMode === 'acceptEdits') {
     permissionMode = 'acceptEdits';
+    allowDangerouslySkipPermissions = false;
   } else if (options.permissionMode === 'default') {
     permissionMode = 'default';
+    allowDangerouslySkipPermissions = false;
   } else if (options.permissionMode) {
     permissionMode = options.permissionMode;
+    allowDangerouslySkipPermissions = false;
   }
 
   // Load MCP servers from CLI config (merged from user, project, local scopes)
@@ -195,6 +201,12 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
       }
       return sessionId;
     }
+  }
+
+  // Set effort level if specified (1=low … 5=max mapped to SDK strings)
+  const VALID_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'];
+  if (options.effort && VALID_EFFORT.includes(options.effort)) {
+    queryOptions.effort = options.effort;
   }
 
   if (taskSessionId) {
@@ -245,6 +257,7 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
       : options.permissionMode || 'default',
     dangerouslySkipPermissions: options.dangerouslySkipPermissions || false,
     model: options.model || null, // Track which model was used for this message
+    effort: options.effort || null, // Track effort level used for this message
   };
   addTaskResult(task, userMessage);
   sendAndBroadcast(ws, taskSessionId, userMessage);

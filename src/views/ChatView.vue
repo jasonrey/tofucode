@@ -452,8 +452,17 @@ function handleKeydown(e) {
       return;
     }
 
-    // Cmd+[: Cycle model (haiku → sonnet → opus → haiku)
+    // Cmd+[: Cycle effort level (1 → 2 → 3 → ... → 1)
+    // Effort 4 (xhigh) and 5 (max) are only valid on Opus
     if (e.key === '[') {
+      e.preventDefault();
+      const maxEffort = modelSelection.value === 'opus' ? 5 : 3;
+      effortLevel.value = (effortLevel.value % maxEffort) + 1;
+      return;
+    }
+
+    // Cmd+]: Cycle model (haiku → sonnet → opus → haiku)
+    if (e.key === ']') {
       e.preventDefault();
       const models = ['haiku', 'sonnet', 'opus'];
       const idx = models.indexOf(modelSelection.value);
@@ -461,8 +470,8 @@ function handleKeydown(e) {
       return;
     }
 
-    // Cmd+]: Cycle permission mode (default → plan → bypass → skip → default)
-    if (e.key === ']') {
+    // Cmd+\: Cycle permission mode (default → plan → bypass → skip → default)
+    if (e.key === '\\') {
       e.preventDefault();
       const modes = ['default', 'plan', 'bypass', 'skip'];
       const idx = modes.indexOf(permissionMode.value);
@@ -809,11 +818,13 @@ function handleVisibilityChange() {
 
 onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange);
+  document.addEventListener('click', closePickers);
 });
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
+  document.removeEventListener('click', closePickers);
   // Cleanup TinyMDE instance
   if (editorInstance.value) {
     editorInstance.value = null;
@@ -913,6 +924,10 @@ watch(currentSession, (newSessionId) => {
       `modelSelection:${newSessionId}`,
       modelSelection.value,
     );
+    localStorage.setItem(
+      `effortLevel:${newSessionId}`,
+      String(effortLevel.value),
+    );
     // Update URL from /new to actual session ID without page refresh
     router.replace({
       name: 'chat',
@@ -927,6 +942,7 @@ watch(
   (newSession, oldSession) => {
     loadPermissionMode();
     loadModelSelection();
+    loadEffortLevel();
 
     // Save input from old session before switching
     // Note: chatInputStorageKey already reflects newSession, so we build the old key manually
@@ -1028,6 +1044,72 @@ watch(modelSelection, (newModel) => {
 
 // Load model on mount
 loadModelSelection();
+
+// Effort level: 1=low 2=medium 3=high (default) 4=xhigh 5=max
+const EFFORT_NAMES = { 1: 'low', 2: 'medium', 3: 'high', 4: 'xhigh', 5: 'max' };
+const EFFORT_STORAGE_KEY = 'effortLevel';
+const effortLevel = ref(3);
+const effortStorageKey = computed(() => {
+  if (sessionParam.value && sessionParam.value !== 'new') {
+    return `effortLevel:${sessionParam.value}`;
+  }
+  return null;
+});
+
+function loadEffortLevel() {
+  if (effortStorageKey.value) {
+    const stored = localStorage.getItem(effortStorageKey.value);
+    const n = Number.parseInt(stored, 10);
+    if (n >= 1 && n <= 5) {
+      effortLevel.value = n;
+      return;
+    }
+  }
+  const stored = localStorage.getItem(EFFORT_STORAGE_KEY);
+  const n = Number.parseInt(stored, 10);
+  if (n >= 1 && n <= 5) effortLevel.value = n;
+}
+
+watch(effortLevel, (n) => {
+  if (effortStorageKey.value)
+    localStorage.setItem(effortStorageKey.value, String(n));
+  localStorage.setItem(EFFORT_STORAGE_KEY, String(n));
+});
+
+// Auto-clamp to high when switching from Opus to a smaller model
+watch(modelSelection, (newModel) => {
+  if (newModel !== 'opus' && effortLevel.value > 3) {
+    effortLevel.value = 3;
+  }
+});
+
+loadEffortLevel();
+
+// Effort-based tint intensity for model colors
+// Higher effort = more saturated tint
+const effortTintStyle = computed(() => {
+  const intensities = {
+    1: { bg: 0.06, active: 0.1 },
+    2: { bg: 0.09, active: 0.14 },
+    3: { bg: 0.12, active: 0.18 },
+    4: { bg: 0.16, active: 0.24 },
+    5: { bg: 0.2, active: 0.3 },
+  };
+  const i = intensities[effortLevel.value] || intensities[3];
+  return {
+    '--model-tint-bg': i.bg,
+    '--model-tint-active': i.active,
+  };
+});
+
+// Mobile picker open state
+const openPicker = ref(null); // 'model' | 'mode' | 'effort' | null
+function togglePicker(name) {
+  openPicker.value = openPicker.value === name ? null : name;
+}
+function closePickers() {
+  openPicker.value = null;
+}
 
 // Auto-clear completed status after 3 seconds
 let completedStatusTimer = null;
@@ -1224,6 +1306,7 @@ function handleSubmit() {
 
   const options = {
     model: modelSelection.value,
+    effort: EFFORT_NAMES[effortLevel.value],
   };
   if (permissionMode.value === 'skip') {
     options.dangerouslySkipPermissions = true;
@@ -2240,7 +2323,7 @@ watch(
       :connected="connected"
     />
 
-    <footer class="footer" :class="['model-' + modelSelection, { 'footer-empty': filesMode && openedFile }]">
+    <footer class="footer" :class="['model-' + modelSelection, { 'footer-empty': filesMode && openedFile }]" :style="effortTintStyle">
       <!-- Content navigation bar -->
       <div v-if="showContentNav" class="content-nav">
         <!-- Turn/command navigator (right-aligned) -->
@@ -2393,92 +2476,196 @@ watch(
             </button>
           </div>
 
-          <!-- Model selector (chat mode only) -->
-          <div v-if="!terminalMode && !filesMode" class="model-tabs">
-            <button
-              class="model-tab"
-              :class="{ active: modelSelection === 'haiku' }"
-              @click="modelSelection = 'haiku'"
-              title="Haiku - Fast & lightweight"
-            >
-              H
-            </button>
-            <button
-              class="model-tab"
-              :class="{ active: modelSelection === 'sonnet' }"
-              @click="modelSelection = 'sonnet'"
-              title="Sonnet - Balanced (default)"
-            >
-              S
-            </button>
-            <button
-              class="model-tab"
-              :class="{ active: modelSelection === 'opus' }"
-              @click="modelSelection = 'opus'"
-              title="Opus - Most capable"
-            >
-              O
-            </button>
+          <!-- Desktop pickers: effort / model / mode (chat mode only, hidden on mobile) -->
+          <div v-if="!terminalMode && !filesMode" class="desktop-pickers">
+            <!-- Effort tabs (1=low … 5=max) -->
+            <div class="effort-tabs">
+              <button
+                v-for="n in 5"
+                v-show="n <= 3 || modelSelection === 'opus'"
+                :key="n"
+                class="effort-tab"
+                :class="{ active: effortLevel === n }"
+                @click="effortLevel = n"
+                :title="`${EFFORT_NAMES[n]}${n > 3 ? ' (Opus only)' : ''}`"
+              >
+                {{ n }}
+              </button>
+            </div>
+            <!-- Model tabs -->
+            <div class="model-tabs">
+              <button
+                class="model-tab"
+                :class="{ active: modelSelection === 'haiku' }"
+                @click="modelSelection = 'haiku'"
+                title="Haiku - Fast & lightweight"
+              >
+                H
+              </button>
+              <button
+                class="model-tab"
+                :class="{ active: modelSelection === 'sonnet' }"
+                @click="modelSelection = 'sonnet'"
+                title="Sonnet - Balanced (default)"
+              >
+                S
+              </button>
+              <button
+                class="model-tab"
+                :class="{ active: modelSelection === 'opus' }"
+                @click="modelSelection = 'opus'"
+                title="Opus - Most capable"
+              >
+                O
+              </button>
+            </div>
+            <!-- Permission tabs -->
+            <div class="permission-tabs">
+              <button
+                class="permission-tab"
+                :class="{ active: permissionMode === 'default' }"
+                @click="permissionMode = 'default'"
+                title="Default - Ask for permissions"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </button>
+              <button
+                class="permission-tab plan"
+                :class="{ active: permissionMode === 'plan' }"
+                @click="permissionMode = 'plan'"
+                title="Plan Mode - Read-only exploration"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+              </button>
+              <button
+                class="permission-tab bypass"
+                :class="{ active: permissionMode === 'bypass' }"
+                @click="permissionMode = 'bypass'"
+                title="Accept Edits - Auto-approve file edits, block bash"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                </svg>
+              </button>
+              <button
+                class="permission-tab skip"
+                :class="{ active: permissionMode === 'skip' }"
+                @click="permissionMode = 'skip'"
+                title="Bypass - No permission checks (dangerous)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+              </button>
+              <!-- Memo file button (beside permission tabs) -->
+              <button
+                v-if="settingsContext?.enableMemo?.()"
+                class="memo-btn"
+                @click="openMemo"
+                :title="`Memo: ${settingsContext?.quickAccessFile?.() || 'TODO.md'}`"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 20h9"/>
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                </svg>
+              </button>
+            </div>
           </div>
-          <!-- Permission tabs (chat mode only) -->
-          <div v-if="!terminalMode && !filesMode" class="permission-tabs">
-            <button
-              class="permission-tab"
-              :class="{ active: permissionMode === 'default' }"
-              @click="permissionMode = 'default'"
-              title="Default - Ask for permissions"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-            </button>
-            <button
-              class="permission-tab plan"
-              :class="{ active: permissionMode === 'plan' }"
-              @click="permissionMode = 'plan'"
-              title="Plan Mode - Read-only exploration"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
-              </svg>
-            </button>
-            <button
-              class="permission-tab bypass"
-              :class="{ active: permissionMode === 'bypass' }"
-              @click="permissionMode = 'bypass'"
-              title="Accept Edits - Auto-approve file edits, block bash"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
-              </svg>
-            </button>
-            <button
-              class="permission-tab skip"
-              :class="{ active: permissionMode === 'skip' }"
-              @click="permissionMode = 'skip'"
-              title="Bypass - No permission checks (dangerous)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-              </svg>
-            </button>
-            <!-- Memo file button (beside permission tabs) -->
-            <button
-              v-if="settingsContext?.enableMemo?.()"
-              class="memo-btn"
-              @click="openMemo"
-              :title="`Memo: ${settingsContext?.quickAccessFile?.() || 'TODO.md'}`"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"/>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-              </svg>
-            </button>
+
+          <!-- Mobile pickers: compact single-button + inline vertical dropdown (chat mode only) -->
+          <div v-if="!terminalMode && !filesMode" class="mobile-pickers">
+            <!-- Effort picker -->
+            <div class="mobile-picker-group" @click.stop>
+              <button
+                class="mobile-picker-btn"
+                :class="{ open: openPicker === 'effort' }"
+                @click="togglePicker('effort')"
+                title="Effort level"
+              >
+                {{ effortLevel }}
+              </button>
+              <div v-if="openPicker === 'effort'" class="mobile-picker-dropdown">
+                <button
+                  v-for="n in 5"
+                  :key="n"
+                  class="mobile-picker-opt"
+                  v-show="n <= 3 || modelSelection === 'opus'"
+                  :class="{ active: effortLevel === n }"
+                  @click="effortLevel = n; closePickers()"
+                  :title="`${EFFORT_NAMES[n]}${n > 3 ? ' (Opus only)' : ''}`"
+                >{{ n }} <span>{{ EFFORT_NAMES[n] }}</span></button>
+              </div>
+            </div>
+            <!-- Model picker -->
+            <div class="mobile-picker-group" @click.stop>
+              <button
+                class="mobile-picker-btn"
+                :class="{ open: openPicker === 'model' }"
+                @click="togglePicker('model')"
+                title="Model"
+              >
+                {{ modelSelection === 'haiku' ? 'H' : modelSelection === 'sonnet' ? 'S' : 'O' }}
+              </button>
+              <div v-if="openPicker === 'model'" class="mobile-picker-dropdown">
+                <button
+                  class="mobile-picker-opt"
+                  :class="{ active: modelSelection === 'haiku' }"
+                  @click="modelSelection = 'haiku'; closePickers()"
+                >H <span>Haiku</span></button>
+                <button
+                  class="mobile-picker-opt"
+                  :class="{ active: modelSelection === 'sonnet' }"
+                  @click="modelSelection = 'sonnet'; closePickers()"
+                >S <span>Sonnet</span></button>
+                <button
+                  class="mobile-picker-opt"
+                  :class="{ active: modelSelection === 'opus' }"
+                  @click="modelSelection = 'opus'; closePickers()"
+                >O <span>Opus</span></button>
+              </div>
+            </div>
+            <!-- Mode picker -->
+            <div class="mobile-picker-group" @click.stop>
+              <button
+                class="mobile-picker-btn"
+                :class="['mobile-mode-' + permissionMode, { open: openPicker === 'mode' }]"
+                @click="togglePicker('mode')"
+                title="Permission mode"
+              >
+                {{ { default: 'def', plan: 'pln', bypass: 'edt', skip: 'skip' }[permissionMode] }}
+              </button>
+              <div v-if="openPicker === 'mode'" class="mobile-picker-dropdown">
+                <button
+                  class="mobile-picker-opt"
+                  :class="{ active: permissionMode === 'default' }"
+                  @click="permissionMode = 'default'; closePickers()"
+                >def <span>Default</span></button>
+                <button
+                  class="mobile-picker-opt mobile-mode-plan"
+                  :class="{ active: permissionMode === 'plan' }"
+                  @click="permissionMode = 'plan'; closePickers()"
+                >pln <span>Plan</span></button>
+                <button
+                  class="mobile-picker-opt mobile-mode-bypass"
+                  :class="{ active: permissionMode === 'bypass' }"
+                  @click="permissionMode = 'bypass'; closePickers()"
+                >edt <span>Accept Edits</span></button>
+                <button
+                  class="mobile-picker-opt mobile-mode-skip"
+                  :class="{ active: permissionMode === 'skip' }"
+                  @click="permissionMode = 'skip'; closePickers()"
+                >skip <span>Skip</span></button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -3173,17 +3360,23 @@ watch(
   border-top: none;
 }
 
-/* Model tint on footer/input area */
+/* Model tint on footer/input area
+   Intensity is driven by effort level via --model-tint-bg / --model-tint-active
+   set inline on the footer element (see effortTintStyle in script).
+   Haiku = blue, Sonnet = yellow, Opus = purple. */
 .footer.model-haiku {
-  background-color: rgba(56, 189, 248, 0.12);
+  --model-rgb: 56, 189, 248;
+  background-color: rgba(56, 189, 248, var(--model-tint-bg, 0.12));
 }
 
 .footer.model-sonnet {
-  /* No tint - sonnet is the default */
+  --model-rgb: 234, 179, 8;
+  background-color: rgba(234, 179, 8, var(--model-tint-bg, 0.12));
 }
 
 .footer.model-opus {
-  background-color: rgba(245, 158, 11, 0.12);
+  --model-rgb: 168, 85, 247;
+  background-color: rgba(168, 85, 247, var(--model-tint-bg, 0.12));
 }
 
 /* Content navigation bar (turn/command nav) */
@@ -3462,6 +3655,120 @@ watch(
   }
 }
 
+/* Desktop vs mobile picker visibility */
+.desktop-pickers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-pickers {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 639px) {
+  .desktop-pickers {
+    display: none;
+  }
+  .mobile-pickers {
+    display: flex;
+  }
+}
+
+/* Mobile picker components */
+.mobile-picker-group {
+  position: relative;
+}
+
+.mobile-picker-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.mobile-picker-btn:hover,
+.mobile-picker-btn.open {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.mobile-picker-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  min-width: 110px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.mobile-picker-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s, background 0.15s;
+}
+
+.mobile-picker-opt:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.mobile-picker-opt.active {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.mobile-picker-opt span {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.mobile-picker-opt.active span {
+  color: var(--text-secondary);
+}
+
+/* Mode colors in mobile picker */
+.mobile-picker-btn.mobile-mode-plan { color: var(--success-color); border-color: rgba(34, 197, 94, 0.4); }
+.mobile-picker-btn.mobile-mode-bypass { color: #eab308; border-color: rgba(234, 179, 8, 0.4); }
+.mobile-picker-btn.mobile-mode-skip { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+
+.mobile-picker-opt.mobile-mode-plan { color: var(--success-color); }
+.mobile-picker-opt.mobile-mode-bypass { color: #eab308; }
+.mobile-picker-opt.mobile-mode-skip { color: #f87171; }
+
+.mobile-picker-opt.mobile-mode-plan.active { background: rgba(34, 197, 94, 0.15); }
+.mobile-picker-opt.mobile-mode-bypass.active { background: rgba(234, 179, 8, 0.15); }
+.mobile-picker-opt.mobile-mode-skip.active { background: rgba(248, 113, 113, 0.15); }
+
+
 /* Model tabs */
 .model-tabs {
   display: flex;
@@ -3494,15 +3801,20 @@ watch(
   background: var(--bg-tertiary);
 }
 
-/* Active model tab colours follow model tint */
+/* Active model tab colours follow model tint + effort intensity */
 .footer.model-haiku .model-tab.active {
   color: rgb(56, 189, 248);
-  background: rgba(56, 189, 248, 0.18);
+  background: rgba(56, 189, 248, var(--model-tint-active, 0.18));
+}
+
+.footer.model-sonnet .model-tab.active {
+  color: rgb(234, 179, 8);
+  background: rgba(234, 179, 8, var(--model-tint-active, 0.18));
 }
 
 .footer.model-opus .model-tab.active {
-  color: rgb(245, 158, 11);
-  background: rgba(245, 158, 11, 0.18);
+  color: rgb(168, 85, 247);
+  background: rgba(168, 85, 247, var(--model-tint-active, 0.18));
 }
 
 .permission-tabs {
@@ -3554,15 +3866,15 @@ watch(
   background: rgba(234, 179, 8, 0.15);
 }
 
-/* Bypass mode - orange/danger */
+/* Skip mode - light red/danger */
 .permission-tab.skip:hover {
-  color: #f97316;
-  background: rgba(249, 115, 22, 0.1);
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
 }
 
 .permission-tab.skip.active {
-  color: #f97316;
-  background: rgba(249, 115, 22, 0.15);
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
 }
 
 /* Mode tabs (Chat/Terminal toggle) — teleported to #view-footer */
@@ -3597,6 +3909,40 @@ watch(
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+
+/* Effort tabs */
+.effort-tabs {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.effort-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.effort-tab:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.effort-tab.active {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
 
 .mode-tabs-group {
   display: flex;
@@ -3853,7 +4199,7 @@ watch(
 }
 
 .input-form.permission-skip {
-  border-color: #f97316; /* orange */
+  border-color: #f87171; /* light red */
 }
 
 .chat-prompt {
@@ -3900,7 +4246,7 @@ watch(
 }
 
 .input-form.permission-skip .chat-prompt {
-  color: #f97316;
+  color: #f87171;
 }
 
 .input {

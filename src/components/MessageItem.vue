@@ -83,6 +83,23 @@ const userPermissionMode = computed(() => {
   return props.message.permissionMode || 'default';
 });
 
+// Effort level number (1-5) stored with the user message
+const EFFORT_NUMBERS = { low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
+const userEffort = computed(() => {
+  if (props.message.type !== 'user') return null;
+  const e = props.message.effort;
+  return e ? (EFFORT_NUMBERS[e] ?? null) : null;
+});
+
+// Short display label for each permission mode
+const MODE_LABELS = {
+  default: 'default',
+  plan: 'plan',
+  acceptEdits: 'edits',
+  bypassPermissions: 'edits',
+  skip: 'skip',
+};
+
 // Permission hint for error messages (shown when blocked in restrictive modes)
 const isPermissionError = computed(() => {
   if (props.message.type !== 'error') return false;
@@ -261,7 +278,15 @@ function togglePlanExpand() {
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
-        <span class="permission-icon" :title="'Permission mode: ' + (userPermissionMode || 'default')" v-html="permissionIcon"></span>
+        <span
+          class="mode-badge"
+          :class="'mode-badge-' + (userPermissionMode || 'default')"
+          :title="'Mode: ' + (userPermissionMode || 'default') + (userEffort ? ' · effort ' + userEffort : '')"
+        >
+          <span class="mode-badge-icon" v-html="permissionIcon"></span>
+          <span class="mode-badge-label">{{ MODE_LABELS[userPermissionMode] || 'def' }}</span>
+          <span v-if="userEffort" class="mode-badge-effort">· {{ userEffort }}</span>
+        </span>
       </div>
     </div>
 
@@ -279,7 +304,7 @@ function togglePlanExpand() {
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
-        <span class="model-badge" :title="'Model: ' + modelDisplayName">{{ modelDisplayName }}</span>
+        <span class="model-badge" :class="'model-' + (assistantModel || 'sonnet')" :title="'Model: ' + modelDisplayName">{{ modelDisplayName }}</span>
       </div>
     </div>
 
@@ -288,7 +313,7 @@ function togglePlanExpand() {
       <div class="tool-header">
         <span class="tool-icon">{{ toolDisplay.icon }}</span>
         <span class="tool-label">{{ message.tool }}</span>
-        <span class="model-badge tool-model-badge" :title="'Model: ' + modelDisplayName">{{ modelDisplayName }}</span>
+        <span class="model-badge tool-model-badge" :class="'model-' + (assistantModel || 'sonnet')" :title="'Model: ' + modelDisplayName">{{ modelDisplayName }}</span>
       </div>
       <div class="tool-content">
         <code v-if="toolDisplay.type === 'command'" class="tool-command">{{ toolDisplay.primary }}</code>
@@ -425,22 +450,25 @@ function togglePlanExpand() {
   border-right: 3px solid var(--border-color);
 }
 
-/* Permission mode colors (border-right) */
+/* Permission mode colors — border-right + subtle background tint */
 .user-message.permission-default {
-  border-right-color: var(--border-color); /* default gray */
+  border-right-color: var(--border-color);
 }
 
 .user-message.permission-plan {
-  border-right-color: var(--success-color); /* green */
+  border-right-color: var(--success-color);
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .user-message.permission-acceptEdits,
 .user-message.permission-bypassPermissions {
-  border-right-color: #eab308; /* yellow - accept edits */
+  border-right-color: #eab308;
+  background: rgba(234, 179, 8, 0.06);
 }
 
 .user-message.permission-skip {
-  border-right-color: #f97316; /* orange */
+  border-right-color: #f87171;
+  background: rgba(248, 113, 113, 0.06);
 }
 
 .user-message .content {
@@ -507,15 +535,75 @@ function togglePlanExpand() {
   letter-spacing: 0.5px;
 }
 
-.permission-icon {
-  display: flex;
-  align-items: center;
-  color: var(--text-muted);
+/* Model-specific badge colors — match the footer toolbar tint palette */
+.model-badge.model-haiku {
+  color: rgb(56, 189, 248);
+  border-color: rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.08);
 }
 
-.permission-icon :deep(svg) {
-  width: 12px;
-  height: 12px;
+.model-badge.model-sonnet {
+  color: rgb(234, 179, 8);
+  border-color: rgba(234, 179, 8, 0.3);
+  background: rgba(234, 179, 8, 0.08);
+}
+
+.model-badge.model-opus {
+  color: rgb(168, 85, 247);
+  border-color: rgba(168, 85, 247, 0.3);
+  background: rgba(168, 85, 247, 0.08);
+}
+
+/* Mode badge on user messages (shows icon + short mode + effort number) */
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.mode-badge-icon {
+  display: flex;
+  align-items: center;
+}
+
+.mode-badge-icon :deep(svg) {
+  width: 10px;
+  height: 10px;
+}
+
+.mode-badge-label,
+.mode-badge-effort {
+  line-height: 1;
+}
+
+/* Per-mode colors */
+.mode-badge-default {
+  color: var(--text-muted);
+  border-color: var(--border-color);
+}
+
+.mode-badge-plan {
+  color: var(--success-color);
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.mode-badge-acceptEdits,
+.mode-badge-bypassPermissions {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.3);
+  background: rgba(234, 179, 8, 0.08);
+}
+
+.mode-badge-skip {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 /* Text message */
