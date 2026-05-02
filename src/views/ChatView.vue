@@ -1135,17 +1135,33 @@ const BTW_RE = /^btw\s+/i;
 const isBtwMode = computed(() => BTW_RE.test(inputValue.value));
 
 function toggleBtw() {
-  const newValue = isBtwMode.value
-    ? inputValue.value.replace(BTW_RE, '')
-    : `btw ${inputValue.value}`;
-  inputValue.value = newValue;
-  if (editorInstance.value) {
-    editorInstance.value.setContent(newValue);
+  if (isBtwMode.value) {
+    // Remove prefix — just strip and leave cursor wherever it is
+    const newValue = inputValue.value.replace(BTW_RE, '');
+    inputValue.value = newValue;
+    editorInstance.value?.setContent(newValue);
+  } else {
+    const isEmpty = !inputValue.value.trim();
+    const sel = editorInstance.value?.getSelection();
+    const newValue = `btw ${inputValue.value}`;
+    inputValue.value = newValue;
+    if (editorInstance.value) {
+      editorInstance.value.setContent(newValue);
+      nextTick(() => {
+        if (isEmpty) {
+          // Empty input: place cursor after "btw " and focus
+          editorInstance.value?.setSelection({ row: 0, col: 4 });
+          editorEl.value?.querySelector('[contenteditable]')?.focus();
+        } else if (sel) {
+          // Existing text: restore cursor offset by the 4 prepended chars
+          editorInstance.value?.setSelection({
+            row: sel.row,
+            col: sel.col + 4,
+          });
+        }
+      });
+    }
   }
-  nextTick(() => {
-    const editable = editorEl.value?.querySelector('[contenteditable]');
-    editable?.focus();
-  });
 }
 
 // Effort-based tint intensity for model colors
