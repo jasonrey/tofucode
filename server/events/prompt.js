@@ -24,6 +24,7 @@
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config, slugToPath } from '../config.js';
+import { AsyncQueue } from '../lib/async-queue.js';
 import { eventBus } from '../lib/event-bus.js';
 import { logger } from '../lib/logger.js';
 import { loadMcpServers } from '../lib/mcp.js';
@@ -36,6 +37,10 @@ import {
   send,
   watchSession,
 } from '../lib/ws.js';
+
+// Regex to detect "btw " prefix (case-insensitive). Frontend uses this as a
+// cosmetic toggle; backend uses it to route to the running query instead of the queue.
+const BTW_RE = /^btw\s+/i;
 
 // Emit to the event bus only when Discord sync is enabled in user settings.
 // Reads settings fresh each call so toggling the setting takes effect immediately.
@@ -71,13 +76,47 @@ export async function handler(ws, message, context) {
     return;
   }
 
+  // Strip btw prefix before any execution — frontend uses it as a cosmetic toggle,
+  // backend uses it to route to the running query. Store original for badge display.
+  const isBtw = BTW_RE.test(message.prompt);
+  const cleanPrompt = isBtw
+    ? message.prompt.replace(BTW_RE, '')
+    : message.prompt;
+
+  if (!cleanPrompt.trim()) {
+    send(ws, { type: 'error', message: 'Empty message' });
+    return;
+  }
+
   // Check if the CURRENT session already has a running task.
-  // If so, enqueue the prompt instead of rejecting it — it will be auto-processed
-  // once the current task finishes.
   if (context.currentSessionId) {
     const existingTask = getOrCreateTask(context.currentSessionId);
     if (existingTask.status === 'running') {
-      const result = enqueue(context.currentSessionId, message.prompt, {
+      // btw message + active input queue → inject directly into the running query
+      if (isBtw && existingTask.inputQueue) {
+        existingTask.inputQueue.push({
+          type: 'user',
+          message: { role: 'user', content: cleanPrompt },
+          parent_tool_use_id: null,
+        });
+        // Broadcast with original content (btw prefix retained for badge display)
+        const btwUserMessage = {
+          type: 'user',
+          content: message.prompt,
+          timestamp: new Date().toISOString(),
+          sessionId: context.currentSessionId,
+          permissionMode: 'default',
+          dangerouslySkipPermissions: false,
+          model: null,
+          effort: null,
+        };
+        addTaskResult(existingTask, btwUserMessage);
+        broadcastToSession(context.currentSessionId, btwUserMessage);
+        return;
+      }
+
+      // Otherwise enqueue (uses cleanPrompt so btw prefix never reaches Claude)
+      const result = enqueue(context.currentSessionId, cleanPrompt, {
         model: message.model,
         effort: message.effort,
         permissionMode: message.permissionMode,
@@ -103,19 +142,27 @@ export async function handler(ws, message, context) {
     ws,
     context.currentProjectPath,
     context.currentSessionId,
-    message.prompt,
+    cleanPrompt,
     {
       dangerouslySkipPermissions: message.dangerouslySkipPermissions,
       permissionMode: message.permissionMode,
       model: message.model,
       effort: message.effort,
     },
+    isBtw ? message.prompt : null, // displayContent: keep btw prefix for badge
   );
 
   context.currentSessionId = newSessionId;
 }
 
-async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
+async function executePrompt(
+  ws,
+  projectSlug,
+  sessionId,
+  prompt,
+  options = {},
+  displayContent = null,
+) {
   let taskSessionId = sessionId;
 
   // Convert slug to actual path for cwd
@@ -242,10 +289,12 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
   // Pass abort controller to SDK so it can actually cancel the API request
   queryOptions.abortController = abortController;
 
-  // Add user message and send to client immediately (and broadcast to other watchers)
+  // Add user message and send to client immediately (and broadcast to other watchers).
+  // displayContent is the original text (may include "btw " prefix for badge display);
+  // prompt is the clean text actually sent to Claude.
   const userMessage = {
     type: 'user',
-    content: prompt,
+    content: displayContent || prompt,
     timestamp: new Date().toISOString(),
     sessionId: taskSessionId,
     permissionMode: options.dangerouslySkipPermissions
@@ -271,15 +320,32 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
   // post-loop fallback checks it, causing both messages to execute simultaneously.
   let shouldProcessQueue = false;
 
+  // Wrap prompt in an AsyncQueue so btw messages can be injected mid-run.
+  // Passing an AsyncIterable enables the SDK's streaming input mode.
+  const inputQueue = new AsyncQueue();
+  inputQueue.push({
+    type: 'user',
+    message: { role: 'user', content: prompt },
+    parent_tool_use_id: null,
+  });
+  task.inputQueue = inputQueue;
+
+  // Centralised cleanup — called on completion, cancel, and error
+  function closeInputQueue() {
+    inputQueue.close();
+    task.inputQueue = null;
+  }
+
   let stream;
   try {
     console.log(
       `Calling SDK query() with prompt: "${prompt.substring(0, 50)}..."`,
     );
-    stream = query({ prompt, options: queryOptions });
-    task.stream = stream; // Store Query object for streamInput() access
+    stream = query({ prompt: inputQueue, options: queryOptions });
+    task.stream = stream;
     console.log('Query returned:', typeof stream, stream ? 'truthy' : 'falsy');
   } catch (error) {
+    closeInputQueue();
     // Handle stream creation errors
     task.status = 'error';
     task.error = error.message;
@@ -546,6 +612,7 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
         // two queued messages simultaneously.
         task.status = 'completed';
         task.stream = null;
+        closeInputQueue();
         shouldProcessQueue = true;
         broadcastTaskStatus(taskSessionId, {
           type: 'task_status',
@@ -571,6 +638,7 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
       if (abortController.signal.aborted) {
         task.status = 'cancelled';
         task.stream = null;
+        closeInputQueue();
         broadcastTaskStatus(taskSessionId, {
           type: 'task_status',
           taskId: task.id,
@@ -582,6 +650,7 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
       } else {
         task.status = 'completed';
         task.stream = null;
+        closeInputQueue();
         broadcastTaskStatus(taskSessionId, {
           type: 'task_status',
           taskId: task.id,
@@ -595,7 +664,8 @@ async function executePrompt(ws, projectSlug, sessionId, prompt, options = {}) {
   } catch (error) {
     task.status = 'error';
     task.error = error.message;
-    task.stream = null; // Release stream reference on error too
+    task.stream = null;
+    closeInputQueue();
 
     // Log detailed error information
     console.error(`\n========== Task ${task.id} Error ==========`);

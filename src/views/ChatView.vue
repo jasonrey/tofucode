@@ -1130,6 +1130,19 @@ watch(modelSelection, (newModel) => {
 
 loadEffortLevel();
 
+// btw mode — toggled by button or auto-detected when input starts with "btw "
+const isBtwMode = computed(() => BTW_RE.test(inputValue.value));
+const BTW_RE = /^btw\s+/i;
+
+function toggleBtw() {
+  if (isBtwMode.value) {
+    inputValue.value = inputValue.value.replace(BTW_RE, '');
+  } else {
+    inputValue.value = `btw ${inputValue.value}`;
+  }
+  nextTick(() => textareaEl.value?.focus());
+}
+
 // Effort-based tint intensity for model colors
 // Higher effort = more saturated tint
 const effortTintStyle = computed(() => {
@@ -2536,6 +2549,14 @@ watch(
 
           <!-- Desktop pickers: effort / model / mode (chat mode only, hidden on mobile) -->
           <div v-if="!terminalMode && !filesMode" class="desktop-pickers">
+            <!-- btw toggle: inject into running query instead of queuing (only when running) -->
+            <button
+              v-if="isRunning && currentSession"
+              class="btw-toggle"
+              :class="{ active: isBtwMode }"
+              @click="toggleBtw"
+              title="btw — inject into current run instead of queuing"
+            >btw</button>
             <!-- Effort tabs (1=low … 5=max) -->
             <div class="effort-tabs">
               <button
@@ -3954,6 +3975,31 @@ watch(
 .memo-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* btw toggle button — appears only when a task is running */
+.btw-toggle {
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.btw-toggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+.btw-toggle.active {
+  color: rgb(251, 146, 60);
+  border-color: rgba(251, 146, 60, 0.5);
+  background: rgba(251, 146, 60, 0.1);
 }
 
 /* Effort tabs */

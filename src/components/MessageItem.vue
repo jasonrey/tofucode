@@ -81,12 +81,22 @@ const displayContent = computed(() => {
   return '';
 });
 
-// Render user messages as markdown (like Slack)
+// Render user messages as markdown — strip btw prefix for display (badge shows it instead)
 const renderedUserContent = computed(() => {
   if (props.message.type === 'user') {
-    return renderMarkdown(props.message.content);
+    const content = isBtwMessage.value
+      ? props.message.content.replace(BTW_RE, '')
+      : props.message.content;
+    return renderMarkdown(content);
   }
   return '';
+});
+
+// btw message detection — content starts with "btw " prefix
+const BTW_RE = /^btw\s+/i;
+const isBtwMessage = computed(() => {
+  if (props.message.type !== 'user') return false;
+  return BTW_RE.test(props.message.content || '');
 });
 
 // Permission mode for user messages
@@ -292,6 +302,7 @@ function togglePlanExpand() {
             </svg>
           </button>
         </template>
+        <span v-if="isBtwMessage" class="btw-badge" title="Injected into running session">btw</span>
         <span
           class="mode-badge"
           :class="'mode-badge-' + (userPermissionMode || 'default')"
@@ -627,6 +638,18 @@ function togglePlanExpand() {
   color: rgb(168, 85, 247);
   border-color: rgba(168, 85, 247, 0.3);
   background: rgba(168, 85, 247, 0.08);
+}
+
+/* btw badge — marks messages injected into a running session */
+.btw-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 146, 60, 0.4);
+  background: rgba(251, 146, 60, 0.1);
+  color: rgb(251, 146, 60);
+  letter-spacing: 0.3px;
 }
 
 /* Mode badge on user messages (shows icon + short mode + effort number) */
