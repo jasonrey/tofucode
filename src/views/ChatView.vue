@@ -2240,7 +2240,7 @@ watch(
       :connected="connected"
     />
 
-    <footer class="footer" :class="'model-' + modelSelection">
+    <footer class="footer" :class="['model-' + modelSelection, { 'footer-empty': filesMode && openedFile }]">
       <!-- Content navigation bar -->
       <div v-if="showContentNav" class="content-nav">
         <!-- Turn/command navigator (right-aligned) -->
@@ -3166,6 +3166,11 @@ watch(
   padding: 12px 16px;
   border-top: 1px solid var(--border-color);
   transition: background-color 0.2s;
+}
+
+.footer.footer-empty {
+  padding: 0;
+  border-top: none;
 }
 
 /* Model tint on footer/input area */
