@@ -273,14 +273,7 @@ export async function executePrompt(
 
   if (taskSessionId) {
     queryOptions.resume = taskSessionId;
-    console.log(`Resuming session: ${taskSessionId}`);
   }
-
-  console.log(
-    `Starting prompt in ${projectPath} with permissionMode: ${queryOptions.permissionMode}, model: ${queryOptions.model || 'default'}`,
-  );
-  console.log('Received model from client:', options.model);
-  console.log('Query options:', JSON.stringify(queryOptions, null, 2));
 
   // Initialize task
   const task = taskSessionId
@@ -357,26 +350,22 @@ export async function executePrompt(
 
   let stream;
   try {
-    console.log(
-      `Calling SDK query() with prompt: "${prompt.substring(0, 50)}..."`,
-    );
     stream = query({ prompt: inputQueue, options: queryOptions });
     task.stream = stream;
-    console.log('Query returned:', typeof stream, stream ? 'truthy' : 'falsy');
   } catch (error) {
     closeInputQueue();
     // Handle stream creation errors
     task.status = 'error';
     task.error = error.message;
 
-    // Log detailed error information for stream creation
+    // Log error information for stream creation
     console.error('\n========== Stream Creation Error ==========');
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
-    console.error('Error object:', JSON.stringify(error, null, 2));
     console.error('Session ID:', taskSessionId);
     console.error('Project path:', projectPath);
-    console.error('Query options:', JSON.stringify(queryOptions, null, 2));
+    console.error('Permission mode:', queryOptions.permissionMode);
+    console.error('Model:', queryOptions.model || 'default');
     console.error('===========================================\n');
 
     // Determine user-friendly error message

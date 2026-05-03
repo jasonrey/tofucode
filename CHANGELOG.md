@@ -7,20 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Manual compact button** — "compact" button appears beside the btw toggle when a session is idle; triggers `/compact` via the SDK to summarise the conversation and reduce context length
-
-### Fixed
-- **Session bleed across SPA navigation** — switching between parallel-running sessions via the SPA router no longer leaks the running session's streaming output into the new view. Removed a defensive `!currentSession` filter fallback in the chat WS message handler that allowed in-flight broadcasts from the previous session to land in the new view during the bootstrap window. Session navigation links across Sidebar, SessionsView, ChatView keyboard shortcuts, NotesView, and CommandPalette now use `router.push` instead of `window.location.href`, preserving the WebSocket connection and avoiding full page reloads. Cross-session message gaps are filled by the existing `session_history` reload on every `select_session`
-- **Session-less errors no longer silently dropped** — `error` messages without a `sessionId` (e.g. "no project selected") now always pass through the chat WS message filter; previously the strict session-match guard introduced by the bleed fix would discard them
-- **NotesView session slug fallback** — path-to-slug conversion in NotesView now preserves the leading dash (matching the canonical format), preventing broken navigation when `projectSlug` is absent from a session record
-
 ## [1.5.0] - 2026-05-03
 
 ### Added
 - **Session branching** — "branch" button on each completed turn forks the session at that point, opening a new session with the transcript up to and including that turn; uses SDK `forkSession()` natively
 - **btw interjection** — type `btw <message>` while a task is running to inject context directly into the live query without cancelling it; a toggle button appears in the toolbar when a session is running; btw messages render with an orange "btw" badge in the transcript
 - **Effort selector** — 1–5 tabs in the toolbar (low / medium / high / xhigh / max) control SDK thinking effort; xhigh and max only shown when Opus is selected; persisted per session in localStorage; effort level drives a subtle tint intensity on the input area
+- **Session rewind** — rewind button on each completed assistant turn lets you fork the session back to that point with a 15-second undo window; creates a new branch from the chosen turn without destroying the original
+- **Manual compact button** — "compact" button appears beside the btw toggle when a session is idle; triggers `/compact` via the SDK to summarise the conversation and reduce context length
+- **Message mode badge** — each assistant message shows a small badge indicating the permission mode it was run under (default / plan / skip)
+- **Debug session tooltip** — hovering the connection pill in the header shows the current WS session ID (aids debugging session-switch issues)
+
+### Changed
+- **Permission modes simplified** — reduced from 4 modes to 3: Default (shield), Plan (green border), and Bypass (orange border); Accept Edits mode removed as it overlapped with Default + file permission grants
+- **Model / mode keyboard shortcuts** — `Cmd+[` cycles effort level; `Cmd+]` cycles permission mode through the 3 remaining modes
+
+### Fixed
+- **Async context clobber on session switch** — when session A's long-running prompt completed while the user was viewing session B, the handler was overwriting `context.currentSessionId` back to A; the next message sent in B would fail with "No conversation found" and be silently dropped; fixed by snapshotting the session ID before the `await` and skipping the write-back if the context changed mid-flight
+- **Session-switch message delivery gap** — `select_project` was prematurely unregistering the session watcher before `select_session` had a chance to re-register the new one, causing broadcasts in the transition window to be silently dropped; watcher management is now deferred entirely to `select_session`
+- **Session bleed across SPA navigation** — switching between parallel-running sessions via the SPA router no longer leaks the running session's streaming output into the new view; session navigation links across Sidebar, SessionsView, ChatView keyboard shortcuts, NotesView, and CommandPalette now use `router.push` instead of `window.location.href`, preserving the WebSocket connection and avoiding full page reloads
+- **Session-less errors no longer silently dropped** — `error` messages without a `sessionId` (e.g. "no project selected") now always pass through the chat WS message filter
+- **btw toggle: cursor placement** — toggling btw mode places the cursor after the prefix on an empty input and preserves cursor position on existing text
+- **btw toggle: TinyMDE sync** — btw toggle now correctly syncs TinyMDE editor content and focuses the contenteditable
+- **btw: input queue closed on cancel** — the async input queue is now properly closed when a task is cancelled mid-loop, preventing a stuck generator
+- **Session rewind: banner leak and pagination** — rewind confirmation banner no longer bleeds into other sessions; paginated turns are now all visible in the rewind UI; confirm resets properly
+- **NotesView session slug fallback** — path-to-slug conversion in NotesView now preserves the leading dash (matching the canonical format), preventing broken navigation when `projectSlug` is absent from a session record
+
+### Security
+- **Debug log sanitisation** — removed verbose `console.log` calls in `prompt.js` that dumped full query options (including session IDs) to server logs; error-block logging now omits the full options JSON
+- **postcss XSS** — upgraded postcss to 8.5.10 ([GHSA-qx2v-qp2m-jg93](https://github.com/advisories/GHSA-qx2v-qp2m-jg93))
+- See [v1.5.0 Security Report](docs/security_report_v1.5.0.md) for full audit details
 
 ## [1.4.0] - 2026-04-14
 
