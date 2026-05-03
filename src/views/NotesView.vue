@@ -1,11 +1,12 @@
 <script setup>
 import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import FileEditor from '../components/FileEditor.vue';
 import { useFilesManager } from '../composables/useFilesManager';
 import { useWebSocket } from '../composables/useWebSocket';
 
 const route = useRoute();
+const router = useRouter();
 const settingsContext = inject('settings');
 const { send, onMessage, connected, recentSessions, sessionStatuses } =
   useWebSocket();
@@ -25,8 +26,19 @@ function getSessionDisplayTitle(session) {
 function getSessionUrl(session) {
   const projectSlug =
     session.projectSlug ||
-    session.projectPath?.replace(/\//g, '-').replace(/^-/, '');
+    session.projectPath?.replace(/\//g, '-').replace(/^-/, '-');
   return `/project/${projectSlug}/session/${session.sessionId}`;
+}
+
+function openSession(session, event) {
+  event.preventDefault();
+  const slug =
+    session.projectSlug ||
+    session.projectPath?.replace(/\//g, '-').replace(/^-/, '-');
+  router.push({
+    name: 'chat',
+    params: { project: slug, session: session.sessionId },
+  });
 }
 
 const notesBasePath = computed(() => settingsContext.notesBasePath());
@@ -249,6 +261,7 @@ const configured = computed(() => !!notesBasePath.value);
           :href="getSessionUrl(session)"
           class="recent-session-item"
           :title="getSessionDisplayTitle(session)"
+          @click="openSession(session, $event)"
         >
           <span v-if="sessionStatuses.get(session.sessionId)" class="recent-session-status" :class="sessionStatuses.get(session.sessionId).status">
             <svg v-if="sessionStatuses.get(session.sessionId).status === 'running'" width="10" height="10" viewBox="0 0 24 24" class="status-spinner"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
@@ -278,6 +291,7 @@ const configured = computed(() => !!notesBasePath.value);
             :href="getSessionUrl(session)"
             class="recent-session-item"
             :title="getSessionDisplayTitle(session)"
+            @click="openSession(session, $event)"
           >
             <span v-if="sessionStatuses.get(session.sessionId)" class="recent-session-status" :class="sessionStatuses.get(session.sessionId).status">
               <svg v-if="sessionStatuses.get(session.sessionId).status === 'running'" width="10" height="10" viewBox="0 0 24 24" class="status-spinner"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>

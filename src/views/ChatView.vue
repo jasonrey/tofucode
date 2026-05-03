@@ -115,6 +115,16 @@ function getSessionUrl(session) {
   return `/project/${projectSlug}/session/${session.sessionId}`;
 }
 
+function openRecentSession(session) {
+  const slug =
+    session.projectSlug ||
+    session.projectPath?.replace(/\//g, '-').replace(/^-/, '-');
+  router.push({
+    name: 'chat',
+    params: { project: slug, session: session.sessionId },
+  });
+}
+
 // Mode state: 'chat' | 'terminal' | 'files' | 'ports'
 const currentMode = ref('chat');
 const terminalSubTab = ref('history'); // 'bookmarks' | 'active' | 'history'
@@ -494,7 +504,10 @@ function handleKeydown(e) {
     if (e.key === 'n') {
       e.preventDefault();
       if (projectSlug.value) {
-        window.location.href = `/project/${projectSlug.value}/session/new`;
+        router.push({
+          name: 'chat',
+          params: { project: projectSlug.value, session: 'new' },
+        });
       }
       return;
     }
@@ -510,7 +523,13 @@ function handleKeydown(e) {
       // we just take the first one and cycle
       const nextSession = displayed[0];
       if (nextSession) {
-        window.location.href = getSessionUrl(nextSession);
+        router.push({
+          name: 'chat',
+          params: {
+            project: nextSession.projectSlug || projectSlug.value,
+            session: nextSession.sessionId,
+          },
+        });
       }
       return;
     }
@@ -2960,6 +2979,7 @@ watch(
               :href="getSessionUrl(session)"
               class="recent-session-item"
               :title="getSessionDisplayTitle(session)"
+              @click.prevent="openRecentSession(session)"
             >
               <!-- Status indicator at start -->
               <span

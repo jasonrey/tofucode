@@ -112,7 +112,7 @@ function cancelCreateFolder() {
 function selectFolder(folderPath) {
   const slug = `-${folderPath.replace(/^\//, '').replace(/\//g, '-')}`;
   emit('close');
-  window.location.href = `/project/${slug}/session/new`;
+  router.push({ name: 'chat', params: { project: slug, session: 'new' } });
 }
 
 function useCurrentFolder() {
@@ -258,15 +258,19 @@ function handleKeydown(e) {
 function selectSession(session) {
   if (!session) return;
   emit('close');
-  // Use full page reload to ensure clean WebSocket state
-  window.location.href = `/project/${session.projectSlug}/session/${session.sessionId}`;
+  router.push({
+    name: 'chat',
+    params: { project: session.projectSlug, session: session.sessionId },
+  });
 }
 
 function createNewSession(projectSlug) {
   if (!projectSlug) return;
   emit('close');
-  // Use full page reload to ensure clean WebSocket state
-  window.location.href = `/project/${projectSlug}/session/new`;
+  router.push({
+    name: 'chat',
+    params: { project: projectSlug, session: 'new' },
+  });
 }
 
 // Calculate flattened index for a given group and session

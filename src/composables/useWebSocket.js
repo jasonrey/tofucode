@@ -1131,30 +1131,36 @@ export function useChatWebSocket() {
         }
         break;
 
-      // Streaming messages - only append if belongs to current session
+      // Streaming messages - only append if they belong to the current session.
+      // Server sends `session_info` before any streaming frame for a new session,
+      // and WS frames are FIFO + JS is single-threaded, so `currentSession.value`
+      // is always set in time for a strict match. A previous `!currentSession.value`
+      // fallback caused a bleed when navigating from a still-running session to
+      // /new — the null window let the old session's in-flight broadcasts land
+      // in the new view before the server processed the unwatch.
       case 'user':
       case 'text':
       case 'tool_use':
       case 'tool_result':
       case 'result':
-      case 'error':
-        // Filter out messages that don't belong to the current session
-        // Accept messages in these cases:
-        // 1. Message sessionId matches current session (normal case)
-        // 2. Current session is null (new session being created) - accept any messages
-        //    because server assigns ID before we receive session_info
         if (msg.sessionId && msg.sessionId === currentSession.value) {
-          // Case 1: Normal - session IDs match
-          messages.value.push(msg);
-        } else if (!currentSession.value) {
-          // Case 2: New session creation - currentSession is null
-          // Accept messages from the new session being created
-          // (server assigns ID before session_info arrives)
           messages.value.push(msg);
         } else {
-          // Mismatch - different session's message
           console.warn(
             `[useChatWebSocket] Ignoring message for different session. Message sessionId: ${msg.sessionId}, Current sessionId: ${currentSession.value}, Message type: ${msg.type}`,
+          );
+        }
+        break;
+
+      // Error messages: session-scoped errors are filtered like streaming messages;
+      // errors without a sessionId are direct send() calls (e.g. "no project selected")
+      // and must always pass through to avoid silent failures.
+      case 'error':
+        if (!msg.sessionId || msg.sessionId === currentSession.value) {
+          messages.value.push(msg);
+        } else {
+          console.warn(
+            `[useChatWebSocket] Ignoring error for different session. Message sessionId: ${msg.sessionId}, Current sessionId: ${currentSession.value}`,
           );
         }
         break;

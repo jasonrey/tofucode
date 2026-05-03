@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Session bleed across SPA navigation** — switching between parallel-running sessions via the SPA router no longer leaks the running session's streaming output into the new view. Removed a defensive `!currentSession` filter fallback in the chat WS message handler that allowed in-flight broadcasts from the previous session to land in the new view during the bootstrap window. Session navigation links across Sidebar, SessionsView, ChatView keyboard shortcuts, NotesView, and CommandPalette now use `router.push` instead of `window.location.href`, preserving the WebSocket connection and avoiding full page reloads. Cross-session message gaps are filled by the existing `session_history` reload on every `select_session`
+- **Session-less errors no longer silently dropped** — `error` messages without a `sessionId` (e.g. "no project selected") now always pass through the chat WS message filter; previously the strict session-match guard introduced by the bleed fix would discard them
+- **NotesView session slug fallback** — path-to-slug conversion in NotesView now preserves the leading dash (matching the canonical format), preventing broken navigation when `projectSlug` is absent from a session record
+
+## [1.5.0] - 2026-05-03
+
+### Added
+- **Session branching** — "branch" button on each completed turn forks the session at that point, opening a new session with the transcript up to and including that turn; uses SDK `forkSession()` natively
+- **btw interjection** — type `btw <message>` while a task is running to inject context directly into the live query without cancelling it; a toggle button appears in the toolbar when a session is running; btw messages render with an orange "btw" badge in the transcript
+- **Effort selector** — 1–5 tabs in the toolbar (low / medium / high / xhigh / max) control SDK thinking effort; xhigh and max only shown when Opus is selected; persisted per session in localStorage; effort level drives a subtle tint intensity on the input area
+
 ## [1.4.0] - 2026-04-14
 
 ### Added

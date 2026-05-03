@@ -186,8 +186,17 @@ watch(
 );
 
 function startNewSession(projectSlug) {
-  // Full page reload to ensure clean WebSocket state
-  window.location.href = `/project/${projectSlug}/session/new`;
+  router.push({
+    name: 'chat',
+    params: { project: projectSlug, session: 'new' },
+  });
+}
+
+function openSession(projectSlug, sessionId) {
+  router.push({
+    name: 'chat',
+    params: { project: projectSlug, session: sessionId },
+  });
 }
 
 function handleOverlayClick() {
@@ -268,6 +277,7 @@ onMounted(() => {
           <a
             :href="`/project/${session.projectSlug}/session/${session.sessionId}`"
             class="sidebar-link"
+            @click.prevent="openSession(session.projectSlug, session.sessionId)"
           >
             <div class="item-icon" :class="{ 'has-status': sessionStatuses.get(session.sessionId) }">
               <!-- Show status indicator if session has status -->
