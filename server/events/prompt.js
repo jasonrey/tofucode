@@ -186,13 +186,19 @@ async function executePrompt(
   }
 
   // Determine permission mode
-  // Valid modes: 'default', 'bypassPermissions', 'plan'
+  // Valid modes: 'default', 'bypassPermissions', 'plan', 'auto'
+  // 'auto' = bypassPermissions + enableFileCheckpointing (safe bypass with file snapshots)
   let permissionMode = config.permissionMode;
   let allowDangerouslySkipPermissions = permissionMode === 'bypassPermissions';
+  let enableCheckpointing = false;
 
   if (options.dangerouslySkipPermissions) {
     permissionMode = 'bypassPermissions';
     allowDangerouslySkipPermissions = true;
+  } else if (options.permissionMode === 'auto') {
+    permissionMode = 'bypassPermissions';
+    allowDangerouslySkipPermissions = true;
+    enableCheckpointing = true;
   } else if (options.permissionMode === 'plan') {
     permissionMode = 'plan';
     allowDangerouslySkipPermissions = false;
@@ -219,6 +225,8 @@ async function executePrompt(
     settingSources: ['user', 'project', 'local'],
     // Pass MCP servers if any are configured
     ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
+    // Auto mode: enable file checkpointing for safe bypass
+    ...(enableCheckpointing && { enableFileCheckpointing: true }),
   };
 
   // Set model if specified (sonnet, opus, haiku)

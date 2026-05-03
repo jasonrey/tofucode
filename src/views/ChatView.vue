@@ -533,10 +533,10 @@ function handleKeydown(e) {
       return;
     }
 
-    // Cmd+\: Cycle permission mode (default → plan → skip → default)
+    // Cmd+\: Cycle permission mode (default → plan → skip → auto → default)
     if (e.key === '\\') {
       e.preventDefault();
-      const modes = ['default', 'plan', 'skip'];
+      const modes = ['default', 'plan', 'skip', 'auto'];
       const idx = modes.indexOf(permissionMode.value);
       permissionMode.value = modes[(idx + 1) % modes.length];
       return;
@@ -1409,6 +1409,8 @@ function handleSubmit() {
     options.dangerouslySkipPermissions = true;
   } else if (permissionMode.value === 'plan') {
     options.permissionMode = 'plan';
+  } else if (permissionMode.value === 'auto') {
+    options.permissionMode = 'auto';
   } else {
     // Default mode: explicitly send 'default' so backend doesn't fall through to bypassPermissions
     options.permissionMode = 'default';
@@ -2674,6 +2676,16 @@ watch(
                   <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                 </svg>
               </button>
+              <button
+                class="permission-tab auto"
+                :class="{ active: permissionMode === 'auto' }"
+                @click="permissionMode = 'auto'"
+                title="Auto - Bypass permissions + file snapshots"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/>
+                </svg>
+              </button>
               <!-- Memo file button (beside permission tabs) -->
               <button
                 v-if="settingsContext?.enableMemo?.()"
@@ -2761,8 +2773,12 @@ watch(
                   <line x1="16" y1="17" x2="8" y2="17"/>
                 </svg>
                 <!-- skip: lightning bolt -->
-                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg v-else-if="permissionMode === 'skip'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                <!-- auto: sparkle -->
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/>
                 </svg>
               </button>
               <div v-if="openPicker === 'mode'" class="mobile-picker-dropdown">
@@ -2789,6 +2805,14 @@ watch(
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   <span>Skip</span>
+                </button>
+                <button
+                  class="mobile-picker-opt mobile-mode-auto"
+                  :class="{ active: permissionMode === 'auto' }"
+                  @click="permissionMode = 'auto'; closePickers()"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>
+                  <span>Auto</span>
                 </button>
               </div>
             </div>
@@ -3879,12 +3903,15 @@ watch(
 /* Mode colors in mobile picker */
 .mobile-picker-btn.mobile-mode-plan { color: var(--success-color); border-color: rgba(34, 197, 94, 0.4); }
 .mobile-picker-btn.mobile-mode-skip { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+.mobile-picker-btn.mobile-mode-auto { color: #a78bfa; border-color: rgba(139, 92, 246, 0.4); }
 
 .mobile-picker-opt.mobile-mode-plan { color: var(--success-color); }
 .mobile-picker-opt.mobile-mode-skip { color: #f87171; }
+.mobile-picker-opt.mobile-mode-auto { color: #a78bfa; }
 
 .mobile-picker-opt.mobile-mode-plan.active { background: rgba(34, 197, 94, 0.15); }
 .mobile-picker-opt.mobile-mode-skip.active { background: rgba(248, 113, 113, 0.15); }
+.mobile-picker-opt.mobile-mode-auto.active { background: rgba(139, 92, 246, 0.15); }
 
 
 /* Model tabs */
@@ -3982,6 +4009,17 @@ watch(
 .permission-tab.skip.active {
   color: #f87171;
   background: rgba(248, 113, 113, 0.15);
+}
+
+/* Auto mode - purple */
+.permission-tab.auto:hover {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.permission-tab.auto.active {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.15);
 }
 
 /* Mode tabs (Chat/Terminal toggle) — teleported to #view-footer */
@@ -4330,6 +4368,10 @@ watch(
   border-color: #f87171; /* light red */
 }
 
+.input-form.permission-auto {
+  border-color: #a78bfa; /* purple */
+}
+
 .chat-prompt {
   color: var(--text-muted);
   display: flex;
@@ -4371,6 +4413,10 @@ watch(
 
 .input-form.permission-skip .chat-prompt {
   color: #f87171;
+}
+
+.input-form.permission-auto .chat-prompt {
+  color: #a78bfa;
 }
 
 .input {

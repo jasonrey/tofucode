@@ -119,6 +119,7 @@ const MODE_LABELS = {
   default: 'default',
   plan: 'plan',
   skip: 'skip',
+  auto: 'auto',
 };
 
 // Permission hint for error messages (shown when blocked in restrictive modes)
@@ -165,6 +166,11 @@ const permissionIcon = computed(() => {
   if (mode === 'skip') {
     return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </svg>`;
+  }
+  if (mode === 'auto') {
+    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/>
     </svg>`;
   }
   // default
@@ -695,6 +701,12 @@ function togglePlanExpand() {
   color: #f87171;
   border-color: rgba(248, 113, 113, 0.3);
   background: rgba(248, 113, 113, 0.08);
+}
+
+.mode-badge-auto {
+  color: #a78bfa;
+  border-color: rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.08);
 }
 
 /* Text message */
