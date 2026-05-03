@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Manual compact button** — "compact" button appears beside the btw toggle when a session is idle; triggers `/compact` via the SDK to summarise the conversation and reduce context length
+
 ### Fixed
 - **Session bleed across SPA navigation** — switching between parallel-running sessions via the SPA router no longer leaks the running session's streaming output into the new view. Removed a defensive `!currentSession` filter fallback in the chat WS message handler that allowed in-flight broadcasts from the previous session to land in the new view during the bootstrap window. Session navigation links across Sidebar, SessionsView, ChatView keyboard shortcuts, NotesView, and CommandPalette now use `router.push` instead of `window.location.href`, preserving the WebSocket connection and avoiding full page reloads. Cross-session message gaps are filled by the existing `session_history` reload on every `select_session`
 - **Session-less errors no longer silently dropped** — `error` messages without a `sessionId` (e.g. "no project selected") now always pass through the chat WS message filter; previously the strict session-match guard introduced by the bleed fix would discard them

@@ -8,6 +8,7 @@
 import { handler as answerQuestion } from './answer-question.js';
 import { handler as browseFolder } from './browse-folder.js';
 import { handler as cancelTask } from './cancel-task.js';
+import { handler as compactSession } from './compact-session.js';
 import { handler as deleteSession } from './delete-session.js';
 import { getHandler as draftGet, setHandler as draftSet } from './draft.js';
 import {
@@ -108,6 +109,7 @@ export const handlers = {
   set_session_title: setSessionTitle,
   get_task_statuses: getTaskStatuses,
   cancel_task: cancelTask,
+  compact_session: compactSession,
   'terminal:exec': terminalExec,
   'terminal:kill': terminalKill,
   'terminal:list': terminalList,

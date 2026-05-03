@@ -1417,6 +1417,10 @@ export function useChatWebSocket() {
     send({ type: 'fork_session', sessionId, keepGlobalTurns });
   }
 
+  function compactSession() {
+    send({ type: 'compact_session' });
+  }
+
   // Terminal actions
   function execCommand(command, cwd) {
     send({ type: 'terminal:exec', command, cwd });
@@ -1553,6 +1557,9 @@ export function useChatWebSocket() {
 
     // Session fork
     forkSession,
+
+    // Session compact
+    compactSession,
 
     // Direct send
     send,

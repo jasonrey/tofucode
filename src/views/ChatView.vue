@@ -84,6 +84,7 @@ const {
   rewindSession,
   rewindSessionUndo,
   forkSession,
+  compactSession,
 } = useChatWebSocket();
 
 // Debug mode
@@ -2616,6 +2617,13 @@ watch(
               @click="toggleBtw"
               title="btw — inject into current run instead of queuing"
             >btw</button>
+            <!-- compact: manual compaction trigger (only when idle with an existing session) -->
+            <button
+              v-if="!isRunning && currentSession && !isNewSession"
+              class="compact-btn"
+              @click="compactSession"
+              title="Compact — summarise conversation to reduce context length"
+            >compact</button>
             <!-- Effort tabs (1=low … 5=max) -->
             <div class="effort-tabs">
               <button
@@ -4060,6 +4068,25 @@ watch(
   color: rgb(251, 146, 60);
   border-color: rgba(251, 146, 60, 0.5);
   background: rgba(251, 146, 60, 0.1);
+}
+
+/* compact button — appears only when session is idle */
+.compact-btn {
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.compact-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
 }
 
 /* Effort tabs */

@@ -155,7 +155,7 @@ export async function handler(ws, message, context) {
   context.currentSessionId = newSessionId;
 }
 
-async function executePrompt(
+export async function executePrompt(
   ws,
   projectSlug,
   sessionId,
