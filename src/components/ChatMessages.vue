@@ -49,6 +49,7 @@ const emit = defineEmits([
   'load-older-messages',
   'answer-question',
   'rewind',
+  'fork',
 ]);
 
 const messagesEl = ref(null);
@@ -429,6 +430,39 @@ function handleRewind(localTurnIndex) {
   emit('rewind', keepGlobalTurns);
 }
 
+// Fork: emit keepGlobalTurns to parent (includes this turn)
+function handleFork(localTurnIndex) {
+  const offset =
+    (props.totalTurns || props.loadedTurns) - (props.loadedTurns || 0);
+  // +1 vs rewind: include the turn being forked at
+  const keepGlobalTurns = offset + localTurnIndex + 1;
+  emit('fork', keepGlobalTurns);
+}
+
+// Fork confirm state — track which turn index is in confirm mode
+const forkConfirmIndex = ref(-1);
+
+function showForkConfirm(turnIndex) {
+  forkConfirmIndex.value = turnIndex;
+}
+
+function cancelForkConfirm() {
+  forkConfirmIndex.value = -1;
+}
+
+function confirmFork(turnIndex) {
+  forkConfirmIndex.value = -1;
+  handleFork(turnIndex);
+}
+
+// Reset fork confirm when task starts or session changes (messages cleared)
+watch(
+  [() => props.isRunning, () => props.messages.length],
+  ([running, len]) => {
+    if (running || len === 0) forkConfirmIndex.value = -1;
+  },
+);
+
 // Expose scrollToBottom, navigation functions, and navState for parent footer nav bar
 defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
 </script>
@@ -473,6 +507,26 @@ defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
           </template>
           <!-- Files touched summary (collapsed, shown when turn has any file ops) -->
           <TurnFilesSummary v-if="turn.filesTouched.length > 0" :files="turn.filesTouched" />
+          <!-- Fork button (branch from this turn) -->
+          <div
+            v-if="!isRunning && turn.userMessage && turn.responses.length > 0"
+            class="fork-turn"
+          >
+            <template v-if="forkConfirmIndex === turnIndex">
+              <span class="fork-confirm-label">branch from here?</span>
+              <button class="fork-confirm-btn" @click="confirmFork(turnIndex)">yes</button>
+              <button class="fork-cancel-btn" @click="cancelForkConfirm">no</button>
+            </template>
+            <button v-else class="fork-btn" @click="showForkConfirm(turnIndex)" title="Branch session from this turn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="6" y1="3" x2="6" y2="15"/>
+                <circle cx="18" cy="6" r="3"/>
+                <circle cx="6" cy="18" r="3"/>
+                <path d="M18 9a9 9 0 0 1-9 9"/>
+              </svg>
+              branch
+            </button>
+          </div>
         </div>
       </div>
       <div class="empty" v-else-if="!isRunning && (isNewSession || contextReady)">
@@ -755,6 +809,68 @@ defineExpose({ scrollToBottom, goToPreviousTurn, goToNextTurn, navState });
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Fork turn button */
+.fork-turn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.fork-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.conversation-turn:hover .fork-btn {
+  opacity: 1;
+}
+
+.fork-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.fork-confirm-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.fork-confirm-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  background: rgba(139, 92, 246, 0.15);
+  color: rgb(167, 139, 250);
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.fork-confirm-btn:hover {
+  background: rgba(139, 92, 246, 0.25);
+}
+
+.fork-cancel-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.fork-cancel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
 }
 
 </style>

@@ -1407,6 +1407,10 @@ export function useChatWebSocket() {
     send({ type: 'rewind_session:undo', sessionId });
   }
 
+  function forkSession(sessionId, keepGlobalTurns) {
+    send({ type: 'fork_session', sessionId, keepGlobalTurns });
+  }
+
   // Terminal actions
   function execCommand(command, cwd) {
     send({ type: 'terminal:exec', command, cwd });
@@ -1540,6 +1544,9 @@ export function useChatWebSocket() {
     // Session rewind
     rewindSession,
     rewindSessionUndo,
+
+    // Session fork
+    forkSession,
 
     // Direct send
     send,

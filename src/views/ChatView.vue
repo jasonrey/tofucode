@@ -83,6 +83,7 @@ const {
   onMessage,
   rewindSession,
   rewindSessionUndo,
+  forkSession,
 } = useChatWebSocket();
 
 // Debug mode
@@ -150,6 +151,11 @@ function handleRewind(keepGlobalTurns) {
   rewindSession(currentSession.value, keepGlobalTurns);
 }
 
+function handleFork(keepGlobalTurns) {
+  if (!currentSession.value) return;
+  forkSession(currentSession.value, keepGlobalTurns);
+}
+
 function handleRewindUndo() {
   if (!rewindUndo.value) return;
   const { sessionId, timer } = rewindUndo.value;
@@ -181,6 +187,18 @@ onMessage((msg) => {
   if (msg.type === 'rewind_session:error') {
     // Could show an error toast here — for now just log
     console.warn('[rewind]', msg.message);
+  }
+  if (msg.type === 'fork_session:result') {
+    router.push({
+      name: 'chat',
+      params: {
+        project: projectSlug.value,
+        session: msg.newSessionId,
+      },
+    });
+  }
+  if (msg.type === 'fork_session:error') {
+    console.warn('[fork]', msg.message);
   }
 });
 
@@ -2364,6 +2382,7 @@ watch(
       @load-older-messages="loadOlderMessages"
       @answer-question="handleAnswerQuestion"
       @rewind="handleRewind"
+      @fork="handleFork"
     />
 
     <!-- Rewind undo banner -->

@@ -19,6 +19,7 @@ import {
   handleFilesRename,
   handleFilesWrite,
 } from './files.js';
+import { handler as forkSession } from './fork-session.js';
 import { handler as getGitDiff } from './get-git-diff.js';
 import { handler as getProjectStatus } from './get-project-status.js';
 import { handler as getProjects } from './get-projects.js';
@@ -128,6 +129,7 @@ export const handlers = {
   restart: handleRestart,
   rewind_session: rewindSession,
   'rewind_session:undo': rewindSessionUndo,
+  fork_session: forkSession,
   upgrade: handleUpgrade,
   get_git_diff: getGitDiff,
   git_clone: gitClone,
