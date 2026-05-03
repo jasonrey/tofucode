@@ -26,7 +26,7 @@ import { config, getProjectDisplayName, slugToPath } from '../config.js';
 import { getProjectsList } from '../lib/projects.js';
 import { getAllTitles } from '../lib/session-titles.js';
 import { getSessionsList } from '../lib/sessions.js';
-import { send, unwatchSession } from '../lib/ws.js';
+import { send } from '../lib/ws.js';
 
 export async function handler(ws, message, context) {
   const projectSlug = message.path;
@@ -52,13 +52,13 @@ export async function handler(ws, message, context) {
     }
   }
 
-  // Unwatch previous session if any (before resetting context)
-  if (context.currentSessionId) {
-    unwatchSession(context.currentSessionId, ws);
-  }
-
+  // Update project path. Do NOT touch currentSessionId or watcher registration here.
+  // select_session (always sent immediately after select_project) is responsible for
+  // unregistering the old session and registering the new one. Clearing the session
+  // here creates a race: ws is removed from the watcher set before select_session has
+  // a chance to re-register it, causing broadcastToSession to silently drop messages
+  // sent in the transition window (e.g. the user message echo at prompt start).
   context.currentProjectPath = projectSlug;
-  context.currentSessionId = null;
 
   // Find project info or create basic info from slug
   const allProjects = await getProjectsList();

@@ -1138,18 +1138,25 @@ export function useChatWebSocket() {
         break;
 
       // Streaming messages - only append if they belong to the current session.
-      // Server sends `session_info` before any streaming frame for a new session,
-      // and WS frames are FIFO + JS is single-threaded, so `currentSession.value`
-      // is always set in time for a strict match. A previous `!currentSession.value`
-      // fallback caused a bleed when navigating from a still-running session to
-      // /new — the null window let the old session's in-flight broadcasts land
-      // in the new view before the server processed the unwatch.
+      //
+      // Filter logic:
+      //   !msg.sessionId  → null-sessionId user echo (new session, pre-init). Only
+      //                     reaches this client via direct send() from sendAndBroadcast,
+      //                     never via broadcastToSession, so no cross-session leak risk.
+      //   msg.sessionId === currentSession.value → matching session, accept normally.
+      //   otherwise → mismatch, warn and reject (bleed guard).
+      //
+      // The old `!currentSession.value` fallback was the bleed source; this uses
+      // `!msg.sessionId` instead — a message-side check, not a client-state check.
+      // Safe because null-sessionId only comes from truly new sessions that haven't
+      // been assigned an ID yet; the server-side watcher gate prevents other sessions'
+      // null-sessionId messages from reaching this ws.
       case 'user':
       case 'text':
       case 'tool_use':
       case 'tool_result':
       case 'result':
-        if (msg.sessionId && msg.sessionId === currentSession.value) {
+        if (!msg.sessionId || msg.sessionId === currentSession.value) {
           messages.value.push(msg);
         } else {
           console.warn(

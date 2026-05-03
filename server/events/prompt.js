@@ -148,6 +148,13 @@ export async function handler(ws, message, context) {
     }
   }
 
+  // Capture currentSessionId before the long-running await. select_session (or
+  // new_session) may fire while executePrompt is running and update the context
+  // to a different session. Only write back the result if the context hasn't
+  // been changed — overwriting would clobber the new session and cause the
+  // next prompt to run against the wrong session ID.
+  const sessionIdBeforePrompt = context.currentSessionId;
+
   const newSessionId = await executePrompt(
     ws,
     context.currentProjectPath,
@@ -162,7 +169,9 @@ export async function handler(ws, message, context) {
     isBtw ? message.prompt : null, // displayContent: keep btw prefix for badge
   );
 
-  context.currentSessionId = newSessionId;
+  if (context.currentSessionId === sessionIdBeforePrompt) {
+    context.currentSessionId = newSessionId;
+  }
 }
 
 export async function executePrompt(

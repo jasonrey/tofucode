@@ -37,13 +37,14 @@ export async function handler(ws, _message, context) {
     return;
   }
 
-  const newSessionId = await executePrompt(
+  // executePrompt returns taskSessionId. For an existing session /compact is a
+  // local SDK command — the session ID does not change from the caller's perspective,
+  // so the return value is the same as context.currentSessionId. No reassignment needed.
+  await executePrompt(
     ws,
     context.currentProjectPath,
     context.currentSessionId,
     '/compact',
     {},
   );
-
-  context.currentSessionId = newSessionId;
 }
