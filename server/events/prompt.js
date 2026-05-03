@@ -52,14 +52,24 @@ function discordEmit(event, payload) {
 }
 
 // Helper to send to client and broadcast to other session watchers.
-// ws may be null when processing a queued message after the originating tab closed —
-// in that case we broadcast to session watchers only (no direct send).
+//
+// IMPORTANT: We intentionally use broadcastToSession WITHOUT excluding ws.
+// This means delivery is gated by the sessionWatchers set, not by the captured
+// `ws` reference. When the client navigates away from a session (SPA nav),
+// select_session unregisters ws from that session's watcher set — so no further
+// messages reach the client even though the WS connection is still open.
+//
+// The captured `ws` direct-send is only used as a fallback when sessionId is
+// null (new session before the SDK assigns an ID — the user message bubble).
 function sendAndBroadcast(ws, sessionId, message) {
-  if (ws) {
-    send(ws, message);
-  }
   if (sessionId) {
-    broadcastToSession(sessionId, message, ws);
+    // Send to all current watchers of this session (includes the originating
+    // client if still watching, excludes it if they've navigated away).
+    broadcastToSession(sessionId, message);
+  } else if (ws) {
+    // Fallback: sessionId not yet assigned (new session pre-init).
+    // Send directly to originating client only.
+    send(ws, message);
   }
 }
 

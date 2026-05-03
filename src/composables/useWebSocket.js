@@ -1108,9 +1108,15 @@ export function useChatWebSocket() {
         break;
 
       case 'session_info':
-        currentSession.value = msg.sessionId;
-        // New session is now created and ready for interaction
-        contextReady.value = true;
+        // Only accept session_info for the expected session. Without this guard,
+        // a prompt started in session B (where ws was the originating client) can
+        // send session_info(B) after the user has SPA-navigated to session A,
+        // overwriting currentSession back to B and re-opening the bleed path.
+        // Exception: currentSession is null (new-session bootstrap) — accept any ID.
+        if (!currentSession.value || msg.sessionId === currentSession.value) {
+          currentSession.value = msg.sessionId;
+          contextReady.value = true;
+        }
         break;
 
       case 'project_status':

@@ -2324,7 +2324,7 @@ watch(
 
 <template>
   <div class="chat-view">
-    <AppHeader :show-hamburger="false">
+    <AppHeader :show-hamburger="false" :debug-session="currentSession">
       <template #content>
         <div class="header-breadcrumb">
           <!-- Folder name (last segment) - links to sessions -->

@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useWebSocket } from '../composables/useWebSocket';
 
-defineProps({
+const props = defineProps({
   showBack: {
     type: Boolean,
     default: false,
@@ -18,6 +18,12 @@ defineProps({
   subtitle: {
     type: String,
     default: '',
+  },
+  // Debug: current in-memory session ID from useChatWebSocket.
+  // Only set in ChatView — used to verify the WS filter matches the viewed session.
+  debugSession: {
+    type: String,
+    default: null,
   },
 });
 
@@ -72,7 +78,11 @@ function handleBack() {
     </div>
     <div class="header-right">
       <slot name="actions"></slot>
-      <div class="connection-pill" :class="connectionState">
+      <div
+        class="connection-pill"
+        :class="connectionState"
+        :title="props.debugSession ? `ws session: ${props.debugSession}` : undefined"
+      >
         <span class="connection-dot"></span>
         <span class="connection-label">{{ connectionLabel }}</span>
       </div>
