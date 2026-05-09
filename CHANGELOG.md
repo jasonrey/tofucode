@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Background task notifications** — `task_notification` messages emitted by the SDK after the main turn ends (when a background Bash process completes) were silently dropped due to a missing handler in the stream loop; notifications now broadcast to session watchers and render as an indigo bubble in the chat; same fix applied to the Discord executor
+
 ## [1.5.0] - 2026-05-03
 
 ### Added

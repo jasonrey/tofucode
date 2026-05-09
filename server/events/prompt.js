@@ -591,6 +591,27 @@ export async function executePrompt(
             }
           }
         }
+      } else if (
+        message.type === 'system' &&
+        message.subtype === 'task_notification'
+      ) {
+        // Background task completed (Bash run_in_background or Agent run_in_background).
+        // The SDK keeps the stream open after 'result' until all background tasks finish,
+        // so this arrives after the main turn has already been marked completed.
+        const result = {
+          type: 'task_notification',
+          taskId: message.task_id,
+          status: message.status,
+          summary: message.summary,
+          outputFile: message.output_file,
+          timestamp: new Date().toISOString(),
+          sessionId: taskSessionId,
+        };
+        addTaskResult(task, result);
+        sendAndBroadcast(ws, taskSessionId, result);
+        console.log(
+          `Background task ${message.task_id} ${message.status}: ${message.summary?.substring(0, 100)}`,
+        );
       } else if (message.type === 'result') {
         const result = {
           type: 'result',

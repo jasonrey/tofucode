@@ -1156,6 +1156,7 @@ export function useChatWebSocket() {
       case 'tool_use':
       case 'tool_result':
       case 'result':
+      case 'task_notification':
         if (!msg.sessionId || msg.sessionId === currentSession.value) {
           messages.value.push(msg);
         } else {

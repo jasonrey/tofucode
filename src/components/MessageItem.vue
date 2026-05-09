@@ -424,6 +424,16 @@ function togglePlanExpand() {
       <div class="summary-line"></div>
     </div>
 
+    <!-- Task notification (background task completed/failed/stopped) -->
+    <div v-else-if="messageType === 'task_notification'" class="task-notification-message" :class="'task-notification-' + message.status">
+      <span class="task-notification-icon">{{ message.status === 'completed' ? '✓' : message.status === 'failed' ? '✗' : '⊘' }}</span>
+      <div class="task-notification-body">
+        <span class="task-notification-label">background task {{ message.status }}</span>
+        <span v-if="message.summary" class="task-notification-summary">{{ message.summary }}</span>
+      </div>
+      <span class="task-notification-time" v-if="formattedTimestamp" :title="fullTimestamp">{{ formattedTimestamp }}</span>
+    </div>
+
     <!-- Error -->
     <div v-else-if="messageType === 'error'" class="error-message" :class="{ 'permission-error': isPermissionError }">
       <span class="error-icon">⚠</span>
@@ -1191,6 +1201,78 @@ function togglePlanExpand() {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-secondary);
+}
+
+/* Task notification */
+.task-notification-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.task-notification-message.task-notification-failed {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.task-notification-message.task-notification-stopped {
+  background: rgba(107, 114, 128, 0.08);
+  border-color: rgba(107, 114, 128, 0.2);
+}
+
+.task-notification-icon {
+  flex-shrink: 0;
+  color: rgb(99, 102, 241);
+  font-size: 12px;
+  margin-top: 1px;
+}
+
+.task-notification-failed .task-notification-icon {
+  color: var(--error-color);
+}
+
+.task-notification-stopped .task-notification-icon {
+  color: var(--text-muted);
+}
+
+.task-notification-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.task-notification-label {
+  font-weight: 500;
+  color: rgb(99, 102, 241);
+}
+
+.task-notification-failed .task-notification-label {
+  color: var(--error-color);
+}
+
+.task-notification-stopped .task-notification-label {
+  color: var(--text-muted);
+}
+
+.task-notification-summary {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.task-notification-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  align-self: flex-end;
 }
 
 /* Error */

@@ -274,6 +274,26 @@ export async function* executePrompt({
         }
       }
 
+      // Process task_notification (background task completed)
+      if (
+        message.type === 'system' &&
+        message.subtype === 'task_notification'
+      ) {
+        const result = {
+          type: 'task_notification',
+          taskId: message.task_id,
+          status: message.status,
+          summary: message.summary,
+          outputFile: message.output_file,
+          timestamp: new Date().toISOString(),
+        };
+        addTaskResult(task, result);
+        yield result;
+        logger.log(
+          `[Discord] Background task ${message.task_id} ${message.status}: ${message.summary?.substring(0, 100)}`,
+        );
+      }
+
       // Process result
       if (message.type === 'result') {
         const result = {
