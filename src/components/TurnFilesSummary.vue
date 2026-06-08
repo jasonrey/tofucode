@@ -1,6 +1,5 @@
 <script setup>
 import { ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 
 defineProps({
   files: {
@@ -10,19 +9,9 @@ defineProps({
 });
 
 const expanded = ref(false);
-const route = useRoute();
-const router = useRouter();
 
 function toggle() {
   expanded.value = !expanded.value;
-}
-
-function openInFiles(path) {
-  router.push({
-    name: 'chat',
-    params: route.params,
-    query: { ...route.query, mode: 'files', file: path },
-  });
 }
 </script>
 
@@ -73,13 +62,6 @@ function openInFiles(path) {
 
         <code class="file-path">{{ f.path }}</code>
         <span v-if="f.count > 1" class="file-count">×{{ f.count }}</span>
-
-        <!-- heroicons: arrow-top-right-on-square outline (open in files) -->
-        <button class="file-link-btn" @click.stop="openInFiles(f.path)" title="Open in Files tab">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
-          </svg>
-        </button>
       </div>
     </div>
   </div>

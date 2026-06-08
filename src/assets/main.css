@@ -25,7 +25,6 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
 
   --sidebar-width: 260px;
-  --bottom-bar-height: 44px;
 
   /* Compact input — shared token for small filter selects and custom dropdowns */
   --input-sm-height: 26px;
@@ -33,6 +32,35 @@
   --input-sm-font-size: 13px;
   --input-sm-bg: var(--bg-secondary);
   --input-sm-color: var(--text-secondary);
+}
+
+/* Shared spinner utility — apply .spin to any svg/element */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Sidebar overlay — teleported to body, shown only on tablet/mobile */
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 199;
+  }
 }
 
 * {

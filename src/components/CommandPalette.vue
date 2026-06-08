@@ -13,133 +13,38 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  initialNewProjectMode: {
-    type: Boolean,
-    default: false,
-  },
 });
 
 const emit = defineEmits(['close']);
 
 const router = useRouter();
-const { browseFolder, createFolder, folderContents, currentFolder, onMessage } =
-  useWebSocket();
+const {
+  searchResults,
+  searchLoading,
+  searchTruncated,
+  searchSessions,
+  clearSearch,
+} = useWebSocket();
 
 const searchQuery = ref('');
 const selectedIndex = ref(0);
 const inputRef = ref(null);
 
-// New Project (folder selector) mode
-const newProjectMode = ref(false);
-
-function enterNewProjectMode() {
-  newProjectMode.value = true;
-  searchQuery.value = '';
-  selectedIndex.value = 0;
-  // Load current folder contents
-  browseFolder(currentFolder.value);
-  nextTick(() => inputRef.value?.focus());
-}
-
-function exitNewProjectMode() {
-  newProjectMode.value = false;
-  searchQuery.value = '';
-  selectedIndex.value = 0;
-  nextTick(() => inputRef.value?.focus());
-}
-
-// Folder listing: directories only, sorted (dirs first, then alpha)
-const folderItems = computed(() => {
-  const items = folderContents.value || [];
-  return items
-    .filter((item) => item.isDirectory && !item.name.startsWith('.'))
-    .sort((a, b) => a.name.localeCompare(b.name));
-});
-
-// New folder inline creation
-const isCreatingFolder = ref(false);
-const newFolderName = ref('');
-const folderCreateRef = ref(null);
-const createFolderError = ref('');
-
-// Listen for folder creation errors — re-open form with error message
-const unsubCreateFolder = onMessage((msg) => {
-  if (msg.type === 'files:create:error') {
-    createFolderError.value = msg.error || 'Failed to create folder';
-    isCreatingFolder.value = true;
-    nextTick(() => folderCreateRef.value?.focus());
+// Full-text search debounce
+let searchTimer = null;
+watch(searchQuery, (val) => {
+  clearTimeout(searchTimer);
+  if (!val.trim()) {
+    clearSearch();
+    return;
   }
+  searchTimer = setTimeout(() => searchSessions(val.trim()), 300);
 });
-onUnmounted(() => unsubCreateFolder());
 
-function navigateFolder(path) {
-  browseFolder(path);
-  selectedIndex.value = 0;
-  isCreatingFolder.value = false;
-}
-
-function goUpFolder() {
-  if (!currentFolder.value || currentFolder.value === '/') return;
-  const parent = currentFolder.value.split('/').slice(0, -1).join('/') || '/';
-  browseFolder(parent);
-  selectedIndex.value = 0;
-  isCreatingFolder.value = false;
-}
-
-function startCreatingFolder() {
-  isCreatingFolder.value = true;
-  newFolderName.value = '';
-  createFolderError.value = '';
-  nextTick(() => folderCreateRef.value?.focus());
-}
-
-function confirmCreateFolder() {
-  const name = newFolderName.value.trim();
-  if (!name || !currentFolder.value) return;
-  createFolderError.value = '';
-  const folderPath = `${currentFolder.value}/${name}`.replace(/\/+/g, '/');
-  createFolder(folderPath);
-  isCreatingFolder.value = false;
-  newFolderName.value = '';
-}
-
-function cancelCreateFolder() {
-  isCreatingFolder.value = false;
-  newFolderName.value = '';
-  createFolderError.value = '';
-}
-
-function selectFolder(folderPath) {
-  const slug = `-${folderPath.replace(/^\//, '').replace(/\//g, '-')}`;
-  emit('close');
-  router.push({ name: 'chat', params: { project: slug, session: 'new' } });
-}
-
-function useCurrentFolder() {
-  if (currentFolder.value) selectFolder(currentFolder.value);
-}
-
-// Group sessions by project
+// Group recent sessions by project (shown only when not searching)
 const groupedSessions = computed(() => {
-  const query = searchQuery.value.toLowerCase().trim();
-  let sessionsToGroup = props.sessions;
-
-  // Filter by search query if present
-  if (query) {
-    sessionsToGroup = props.sessions.filter((session) => {
-      const title = (
-        session.title ||
-        session.firstPrompt ||
-        'Untitled'
-      ).toLowerCase();
-      const project = (session.projectName || '').toLowerCase();
-      return title.includes(query) || project.includes(query);
-    });
-  }
-
-  // Group by project
   const groups = {};
-  for (const session of sessionsToGroup) {
+  for (const session of props.sessions) {
     const projectSlug = session.projectSlug;
     if (!groups[projectSlug]) {
       groups[projectSlug] = {
@@ -151,23 +56,30 @@ const groupedSessions = computed(() => {
     groups[projectSlug].sessions.push(session);
   }
 
-  // Convert to array; when searching show all matches, otherwise cap for brevity
   return Object.values(groups)
     .map((group) => ({
       ...group,
-      sessions: query ? group.sessions : group.sessions.slice(0, 5),
+      sessions: group.sessions.slice(0, 5),
     }))
-    .slice(0, query ? undefined : 10);
+    .slice(0, 10);
 });
 
-// Flatten for keyboard navigation
+// Whether the server full-text results are the visible list
+const showingSearchResults = computed(
+  () => !!searchQuery.value && searchResults.value.length > 0,
+);
+
+// Flatten the VISIBLE list for keyboard navigation. With an active query the
+// only navigable list is the server search results (empty while loading or
+// when nothing matched); otherwise the grouped recent sessions.
 const flattenedItems = computed(() => {
+  if (searchQuery.value.trim()) {
+    return showingSearchResults.value ? searchResults.value : [];
+  }
   const items = [];
   for (const group of groupedSessions.value) {
-    items.push({ type: 'project', ...group });
     for (const session of group.sessions) {
       items.push({
-        type: 'session',
         ...session,
         projectName: group.projectName,
       });
@@ -176,34 +88,26 @@ const flattenedItems = computed(() => {
   return items;
 });
 
-// Global keydown listener — works regardless of which element has focus
 watch(
   () => props.show,
   (isVisible) => {
     if (isVisible) {
       searchQuery.value = '';
       selectedIndex.value = 0;
-      if (props.initialNewProjectMode) {
-        newProjectMode.value = true;
-        browseFolder(currentFolder.value);
-      } else {
-        newProjectMode.value = false;
-      }
-      nextTick(() => {
-        inputRef.value?.focus();
-      });
+      nextTick(() => inputRef.value?.focus());
       document.addEventListener('keydown', handleKeydown);
     } else {
       document.removeEventListener('keydown', handleKeydown);
+      clearSearch();
     }
   },
 );
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown);
+  clearTimeout(searchTimer);
 });
 
-// Reset selected index when results change
 watch(flattenedItems, () => {
   selectedIndex.value = 0;
 });
@@ -211,20 +115,15 @@ watch(flattenedItems, () => {
 function handleKeydown(e) {
   if (e.key === 'Escape') {
     e.preventDefault();
-    if (newProjectMode.value) {
-      exitNewProjectMode();
-    } else {
-      emit('close');
-    }
+    emit('close');
     return;
   }
 
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    const max = newProjectMode.value
-      ? folderItems.value.length - 1
-      : flattenedItems.value.length - 1;
-    if (selectedIndex.value < max) selectedIndex.value++;
+    if (selectedIndex.value < flattenedItems.value.length - 1) {
+      selectedIndex.value++;
+    }
     return;
   }
 
@@ -236,22 +135,8 @@ function handleKeydown(e) {
 
   if (e.key === 'Enter') {
     e.preventDefault();
-    if (newProjectMode.value) {
-      if (e.metaKey || e.ctrlKey) {
-        useCurrentFolder();
-      } else {
-        const item = folderItems.value[selectedIndex.value];
-        if (item) navigateFolder(item.path);
-      }
-      return;
-    }
     const item = flattenedItems.value[selectedIndex.value];
-    if (item?.type === 'session') {
-      selectSession(item);
-    } else if (item?.type === 'project') {
-      createNewSession(item.projectSlug);
-    }
-    return;
+    if (item) selectSession(item);
   }
 }
 
@@ -264,34 +149,12 @@ function selectSession(session) {
   });
 }
 
-function createNewSession(projectSlug) {
-  if (!projectSlug) return;
-  emit('close');
-  router.push({
-    name: 'chat',
-    params: { project: projectSlug, session: 'new' },
-  });
+function flatIndexOf(session) {
+  return flattenedItems.value.findIndex(
+    (i) => i.sessionId === session.sessionId,
+  );
 }
 
-// Calculate flattened index for a given group and session
-// sessionIndex = -1 means the project header itself
-function calculateFlattenedIndex(groupIndex, sessionIndex) {
-  let index = 0;
-  // Count all items from previous groups
-  for (let i = 0; i < groupIndex; i++) {
-    const prevGroup = groupedSessions.value[i];
-    index += 1 + prevGroup.sessions.length; // 1 for project header + sessions
-  }
-  // Add current group's offset
-  if (sessionIndex === -1) {
-    // Project header
-    return index;
-  }
-  // Session within current group
-  return index + 1 + sessionIndex; // +1 for current group's project header
-}
-
-// Use shared formatRelativeTime utility
 const formatTime = formatRelativeTime;
 </script>
 
@@ -300,142 +163,64 @@ const formatTime = formatRelativeTime;
     <div v-if="show" class="palette-overlay" @click="$emit('close')">
       <div class="palette" @click.stop>
         <div class="palette-input-wrapper">
-          <!-- Folder mode: up button + path display -->
-          <template v-if="newProjectMode">
-            <button class="palette-up-btn" @click="goUpFolder" :disabled="!currentFolder || currentFolder === '/'" title="Go up">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M15 18l-6-6 6-6"/>
-              </svg>
-            </button>
-            <span class="palette-folder-path">{{ currentFolder || '~' }}</span>
-          </template>
-          <!-- Folder mode: hidden focusable input to capture keydown -->
-          <input v-if="newProjectMode" ref="inputRef" class="palette-input-hidden" readonly />
-          <!-- Session mode: search icon + input -->
-          <template v-else>
-            <svg class="palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            <input
-              ref="inputRef"
-              v-model="searchQuery"
-              type="text"
-              class="palette-input"
-              placeholder="Search sessions..."
-            />
-          </template>
-          <!-- New Project toggle -->
-          <button
-            class="palette-new-project-toggle"
-            :class="{ active: newProjectMode }"
-            :title="newProjectMode ? 'Back to sessions' : 'New Project'"
-            @click="newProjectMode ? exitNewProjectMode() : enterNewProjectMode()"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              <line x1="12" y1="11" x2="12" y2="17"/>
-              <line x1="9" y1="14" x2="15" y2="14"/>
-            </svg>
-            {{ newProjectMode ? 'Sessions' : 'New Project' }}
-          </button>
-          <kbd v-if="!newProjectMode" class="palette-hint">esc</kbd>
+          <svg class="palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            ref="inputRef"
+            v-model="searchQuery"
+            type="text"
+            class="palette-input"
+            placeholder="Search sessions..."
+          />
+          <kbd class="palette-hint">esc</kbd>
         </div>
 
-        <!-- Folder selector results -->
-        <div v-if="newProjectMode" class="palette-results">
-          <!-- Select current folder action -->
-          <div class="palette-folder-select-row" @click="useCurrentFolder">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-            <span class="palette-folder-select-label">Use this folder</span>
-            <span class="palette-folder-select-path">{{ currentFolder }}</span>
-            <kbd class="palette-folder-select-hint">⌘↵</kbd>
-          </div>
-          <!-- Create new folder -->
-          <form v-if="isCreatingFolder" class="palette-folder-create-form" @click.stop @submit.prevent="confirmCreateFolder">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              <line x1="12" y1="11" x2="12" y2="17"/>
-              <line x1="9" y1="14" x2="15" y2="14"/>
-            </svg>
-            <input
-              ref="folderCreateRef"
-              type="text"
-              v-model="newFolderName"
-              class="palette-folder-create-input"
-              placeholder="folder-name"
-              @keydown.escape.prevent="cancelCreateFolder"
-            />
-            <button type="submit" class="palette-folder-create-btn" :disabled="!newFolderName.trim()">Create</button>
-            <button type="button" class="palette-folder-create-btn cancel" @click="cancelCreateFolder">Cancel</button>
-            <span v-if="createFolderError" class="palette-folder-create-error">{{ createFolderError }}</span>
-          </form>
-          <div v-else class="palette-folder-create-row" @click="startCreatingFolder">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              <line x1="12" y1="11" x2="12" y2="17"/>
-              <line x1="9" y1="14" x2="15" y2="14"/>
-            </svg>
-            <span class="palette-folder-create-label">New folder</span>
-          </div>
-          <!-- Subdirectories -->
-          <div
-            v-for="(item, index) in folderItems"
-            :key="item.path"
-            class="palette-item palette-item-folder"
-            :class="{ selected: index === selectedIndex }"
-            @click="navigateFolder(item.path)"
-            @mouseenter="selectedIndex = index"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-            <span class="palette-folder-name">{{ item.name }}</span>
-            <svg class="palette-folder-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 18l6-6-6-6"/>
-            </svg>
-          </div>
-          <div v-if="folderItems.length === 0" class="palette-empty">
-            <p>No subdirectories</p>
-          </div>
-        </div>
-
-        <div class="palette-results" v-else-if="groupedSessions.length > 0">
-          <template v-for="(group, groupIndex) in groupedSessions" :key="group.projectSlug">
-            <!-- Project header -->
+        <!-- Full-text search results -->
+        <div v-if="showingSearchResults" class="palette-results">
+          <div class="palette-section">
+            <div class="section-label">Sessions matching "{{ searchQuery }}"</div>
             <div
-              class="palette-item palette-item-project"
-              :class="{ selected: flattenedItems[selectedIndex]?.type === 'project' && flattenedItems[selectedIndex]?.projectSlug === group.projectSlug }"
-              @mouseenter="selectedIndex = calculateFlattenedIndex(groupIndex, -1)"
+              v-for="(item, index) in searchResults"
+              :key="item.sessionId"
+              class="palette-item"
+              :class="{ selected: index === selectedIndex }"
+              @click="selectSession(item)"
+              @mouseenter="selectedIndex = index"
             >
-              <div class="palette-project-header">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                </svg>
-                <span class="palette-project-name">{{ group.projectName }}</span>
+              <span class="item-icon">💬</span>
+              <div class="item-content">
+                <span class="item-title">{{ item.title || item.sessionId.slice(0, 8) }}</span>
+                <span class="item-meta">{{ item.projectName }}</span>
               </div>
-              <button
-                class="palette-new-session-btn"
-                @click.stop="createNewSession(group.projectSlug)"
-                title="New session"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19"/>
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-              </button>
+              <div v-if="item.snippets?.[0]" class="item-snippet">{{ item.snippets[0] }}</div>
             </div>
+            <div v-if="searchTruncated" class="section-note">Showing top results — type more to narrow</div>
+          </div>
+        </div>
 
-            <!-- Sessions under this project -->
+        <!-- Searching indicator -->
+        <div v-else-if="searchQuery && searchLoading" class="palette-empty">
+          <p>Searching…</p>
+        </div>
+
+        <!-- No results -->
+        <div v-else-if="searchQuery && !searchLoading && !searchResults.length" class="palette-empty">
+          <p>No sessions found</p>
+        </div>
+
+        <!-- Recent sessions grouped by project -->
+        <div v-else-if="groupedSessions.length > 0" class="palette-results">
+          <template v-for="group in groupedSessions" :key="group.projectSlug">
+            <div class="palette-group-label">{{ group.projectName }}</div>
             <div
-              v-for="(session, sessionIndex) in group.sessions"
+              v-for="session in group.sessions"
               :key="session.sessionId"
               class="palette-item palette-item-session"
               :class="{ selected: flattenedItems[selectedIndex]?.sessionId === session.sessionId }"
               @click="selectSession(session)"
-              @mouseenter="selectedIndex = calculateFlattenedIndex(groupIndex, sessionIndex)"
+              @mouseenter="selectedIndex = flatIndexOf(session)"
             >
               <div class="palette-item-content">
                 <span class="palette-item-title">{{ session.title || session.firstPrompt || 'Untitled' }}</span>
@@ -445,11 +230,7 @@ const formatTime = formatRelativeTime;
           </template>
         </div>
 
-        <div class="palette-empty" v-else-if="searchQuery">
-          <p>No sessions found</p>
-        </div>
-
-        <div class="palette-empty" v-else>
+        <div v-else class="palette-empty">
           <p>No recent sessions</p>
         </div>
       </div>
@@ -472,10 +253,11 @@ const formatTime = formatRelativeTime;
   width: 100%;
   max-width: 500px;
   max-height: 400px;
+  margin: 0 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -520,6 +302,15 @@ const formatTime = formatRelativeTime;
   padding: 8px;
 }
 
+.palette-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 12px 4px;
+}
+
 .palette-item {
   display: flex;
   align-items: center;
@@ -538,62 +329,6 @@ const formatTime = formatRelativeTime;
 
 .palette-item.selected {
   background: var(--bg-tertiary);
-}
-
-.palette-item-project {
-  position: relative;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  background: var(--bg-secondary);
-}
-
-.palette-item-project:hover {
-  background: var(--bg-tertiary);
-}
-
-.palette-item-session {
-  padding-left: 32px;
-}
-
-.palette-project-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-}
-
-.palette-project-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.palette-new-session-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.palette-new-session-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
 }
 
 .palette-item-content {
@@ -626,130 +361,35 @@ const formatTime = formatRelativeTime;
   font-size: 13px;
 }
 
-/* New Project toggle button */
-.palette-new-project-toggle {
+/* Search results section */
+.palette-section {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 8px;
+  flex-direction: column;
+}
+
+.section-label {
   font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.palette-new-project-toggle:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
-.palette-new-project-toggle.active {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
-/* Folder mode styles */
-.palette-up-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s;
-}
-
-.palette-up-btn:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
-.palette-up-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.palette-folder-path {
-  flex: 1;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.palette-input-hidden {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-  width: 0;
-  height: 0;
-}
-
-.palette-folder-select-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.palette-folder-select-row:hover {
-  background: var(--bg-tertiary);
-}
-
-.palette-folder-select-label {
-  font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 12px 4px;
 }
 
-.palette-folder-select-path {
-  flex: 1;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.palette-folder-select-hint {
-  font-size: 10px;
-  padding: 2px 5px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+.item-icon {
   flex-shrink: 0;
+  font-size: 14px;
 }
 
-.palette-item-folder {
-  gap: 8px;
-  color: var(--text-secondary);
-}
-
-.palette-folder-name {
+.item-content {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.item-title {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
@@ -758,93 +398,28 @@ const formatTime = formatRelativeTime;
   text-overflow: ellipsis;
 }
 
-.palette-folder-arrow {
+.item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-snippet {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   flex-shrink: 0;
-  color: var(--text-muted);
+  max-width: 200px;
 }
 
-/* New folder creation row + form */
-.palette-folder-create-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background 0.1s;
-  color: var(--text-muted);
-}
-
-.palette-folder-create-row:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-}
-
-.palette-folder-create-label {
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.palette-folder-create-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  margin-bottom: 4px;
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  color: var(--text-muted);
-}
-
-.palette-folder-create-input {
-  flex: 1;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  min-width: 0;
-}
-
-.palette-folder-create-input:focus {
-  outline: none;
-  border-color: var(--text-muted);
-}
-
-.palette-folder-create-btn {
-  padding: 4px 10px;
+.section-note {
   font-size: 11px;
-  font-weight: 500;
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.palette-folder-create-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-}
-
-.palette-folder-create-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.palette-folder-create-btn.cancel {
-  background: transparent;
   color: var(--text-muted);
-}
-
-.palette-folder-create-btn.cancel:hover {
-  color: var(--text-primary);
-}
-
-.palette-folder-create-error {
-  font-size: 11px;
-  color: var(--error-color, #ef4444);
-  white-space: nowrap;
+  padding: 4px 12px 6px;
+  font-style: italic;
 }
 </style>

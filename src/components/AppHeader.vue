@@ -1,16 +1,8 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, inject } from 'vue';
 import { useWebSocket } from '../composables/useWebSocket';
 
 const props = defineProps({
-  showBack: {
-    type: Boolean,
-    default: false,
-  },
-  showHamburger: {
-    type: Boolean,
-    default: false,
-  },
   title: {
     type: String,
     default: '',
@@ -27,13 +19,10 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['back', 'toggle-sidebar']);
-
 const { connectionState } = useWebSocket();
 
-function toggleSidebar() {
-  emit('toggle-sidebar');
-}
+// Sidebar context provided by App.vue — hamburger self-renders when present
+const sidebar = inject('sidebar', null);
 
 const connectionLabel = computed(() => {
   switch (connectionState.value) {
@@ -45,23 +34,14 @@ const connectionLabel = computed(() => {
       return 'Disconnected';
   }
 });
-
-function handleBack() {
-  emit('back');
-}
 </script>
 
 <template>
   <header class="app-header">
     <div class="header-left">
-      <button v-if="showHamburger" class="hamburger-btn" @click="toggleSidebar">
+      <button v-if="sidebar" class="hamburger-btn" title="Toggle sidebar (Ctrl+B)" @click="sidebar.toggle()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 12h18M3 6h18M3 18h18"/>
-        </svg>
-      </button>
-      <button v-if="showBack" class="back-btn" @click="handleBack">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M19 12H5M12 19l-7-7 7-7"/>
         </svg>
       </button>
       <!-- Custom content slot -->
@@ -121,8 +101,7 @@ function handleBack() {
   flex-shrink: 0;
 }
 
-.hamburger-btn,
-.back-btn {
+.hamburger-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,8 +113,7 @@ function handleBack() {
   flex-shrink: 0;
 }
 
-.hamburger-btn:hover,
-.back-btn:hover {
+.hamburger-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }

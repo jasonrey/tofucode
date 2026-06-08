@@ -1,0 +1,22 @@
+:8080 {
+	root * /srv
+
+	handle /api/* {
+		reverse_proxy 172.20.0.1:5000
+	}
+
+	handle /ws* {
+		reverse_proxy 172.20.0.1:5000 {
+			header_up Host {http.request.host}
+			header_up Connection {http.request.header.Connection}
+			header_up Upgrade {http.request.header.Upgrade}
+		}
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server {
+			precompressed br gzip
+		}
+	}
+}

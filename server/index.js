@@ -25,50 +25,15 @@ async function gracefulShutdown(signal) {
   logger.log(`\n${signal} received, shutting down gracefully...`);
 
   try {
-    // Clear task cleanup interval
-    if (global.taskCleanupInterval) {
-      clearInterval(global.taskCleanupInterval);
-      logger.log('Stopped task cleanup interval');
-    }
-
-    // Cancel all running tasks
-    const { tasks } = await import('./lib/tasks.js');
-    for (const [sessionId, task] of tasks) {
-      if (task.status === 'running' && task.abortController) {
-        logger.log(`Cancelling task for session ${sessionId}`);
-        task.abortController.abort();
-      }
-    }
+    // Kill all RC sessions spawned by this server
+    const { killAllManagedPtys } = await import('./lib/rc-launcher.js');
+    killAllManagedPtys();
+    logger.log('Killed managed PTYs');
 
     // Stop version checker
     const { stopVersionChecker } = await import('./lib/version-checker.js');
     stopVersionChecker();
     logger.log('Stopped version checker');
-
-    // Clean up watch manager (stop all intervals before process manager)
-    const watchManager = (await import('./lib/watchManager.js')).default;
-    if (watchManager.destroy) {
-      watchManager.destroy();
-      logger.log('Cleaned up watch manager');
-    }
-
-    // Clean up process manager
-    const processManager = (await import('./lib/processManager.js')).default;
-    if (processManager.destroy) {
-      processManager.destroy();
-      logger.log('Cleaned up process manager');
-    }
-
-    // Stop Discord bot
-    if (process.env.DISCORD_ENABLED === 'true') {
-      try {
-        const { stopDiscordBot } = await import('./discord/bot.js');
-        await stopDiscordBot();
-        logger.log('Discord bot stopped');
-      } catch (err) {
-        logger.error('Error stopping Discord bot:', err);
-      }
-    }
 
     // Close HTTP server
     if (httpServer) {
@@ -130,18 +95,6 @@ const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8'));
 
 // Initialize version checker
 initVersionChecker(pkg.version);
-
-// Initialize periodic task cleanup (every hour)
-const { clearOldTasks } = await import('./lib/tasks.js');
-global.taskCleanupInterval = setInterval(
-  () => {
-    const cleared = clearOldTasks();
-    if (cleared > 0) {
-      logger.log(`Cleared ${cleared} old tasks`);
-    }
-  },
-  60 * 60 * 1000,
-); // Every hour
 
 const app = express();
 const server = createServer(app);
@@ -571,29 +524,6 @@ async function onServerReady() {
   }
   if (process.env.DEBUG === 'true') {
     logger.log('🐛 DEBUG mode enabled - logging to tofucode.log');
-  }
-
-  // Resume watch-enabled bookmarks from disk
-  try {
-    const { loadBookmarks } = await import('./lib/terminal-bookmarks.js');
-    const watchManager = (await import('./lib/watchManager.js')).default;
-    watchManager.loadFromBookmarks(loadBookmarks());
-    logger.log('Watch manager initialized');
-  } catch (err) {
-    logger.error('Error initializing watch manager:', err);
-  }
-
-  // Start Discord bot
-  if (process.env.DISCORD_ENABLED === 'true') {
-    try {
-      const { startDiscordBot } = await import('./discord/bot.js');
-      const discordClient = await startDiscordBot();
-      if (discordClient) {
-        logger.log('Discord bot started');
-      }
-    } catch (err) {
-      logger.error('Error starting Discord bot:', err);
-    }
   }
 }
 

@@ -10,8 +10,8 @@ const routes = [
   },
   {
     path: '/',
-    name: 'projects',
-    component: () => import('../views/ProjectsView.vue'),
+    name: 'home',
+    component: () => import('../views/FolderView.vue'),
   },
   {
     path: '/project/:project',
@@ -22,26 +22,6 @@ const routes = [
     path: '/project/:project/session/:session',
     name: 'chat',
     component: () => import('../views/ChatView.vue'),
-  },
-  {
-    path: '/tasks/:pageId',
-    name: 'task',
-    component: () => import('../views/TaskView.vue'),
-  },
-  {
-    path: '/board',
-    name: 'board',
-    component: () => import('../views/BoardView.vue'),
-  },
-  {
-    path: '/tickets/new',
-    name: 'new-ticket',
-    component: () => import('../views/NewTicketView.vue'),
-  },
-  {
-    path: '/notes/:notePath(.*)*',
-    name: 'notes',
-    component: () => import('../views/NotesView.vue'),
   },
 ];
 

@@ -1,7 +1,10 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
+import RcBadge from '../components/RcBadge.vue';
+import RcClaudeLink from '../components/RcClaudeLink.vue';
+import RcControls from '../components/RcControls.vue';
 import { useWebSocket } from '../composables/useWebSocket';
 import { formatRelativeTime } from '../utils/format.js';
 
@@ -10,29 +13,26 @@ const route = useRoute();
 const {
   connected,
   sessions,
-  projects,
+  selectedProject,
   connect,
   selectProject,
-  setSessionTitle,
   deleteSession,
+  liveBySessionId,
+  listRcSessions,
+  startNewRcSession,
 } = useWebSocket();
-
-// Session title editing
-const editingSessionId = ref(null);
-const editingTitle = ref('');
-const titleInputRef = ref(null);
 
 const projectSlug = computed(() => route.params.project);
 
-// Find project info from projects list
+// Project info from the project_selected response (matches current slug)
 const projectInfo = computed(() => {
-  return (
-    projects.value.find((p) => p.slug === projectSlug.value) || {
-      slug: projectSlug.value,
-      name: projectSlug.value,
-      path: projectSlug.value,
-    }
-  );
+  const selected = selectedProject.value;
+  if (selected && selected.slug === projectSlug.value) return selected;
+  return {
+    slug: projectSlug.value,
+    name: projectSlug.value,
+    path: '',
+  };
 });
 
 // Connect on mount and load sessions when ready
@@ -42,6 +42,7 @@ onMounted(() => {
     if (projectSlug.value) {
       selectProject(projectSlug.value);
     }
+    listRcSessions();
   });
 });
 
@@ -59,43 +60,31 @@ function selectSession(sessionId) {
   });
 }
 
-function startNewSession() {
-  router.push({
-    name: 'chat',
-    params: { project: projectSlug.value, session: 'new' },
-  });
+// New session = spawn an RC process for this project, then open it
+const startingSession = ref(false);
+
+async function startNewSession() {
+  if (startingSession.value) return;
+  startingSession.value = true;
+  try {
+    const result = await startNewRcSession(projectSlug.value);
+    if (result.sessionId) {
+      router.push({
+        name: 'chat',
+        params: { project: projectSlug.value, session: result.sessionId },
+      });
+    } else {
+      alert(result.message || 'Failed to start session');
+    }
+  } catch (err) {
+    alert(`Failed to start session: ${err.message}`);
+  } finally {
+    startingSession.value = false;
+  }
 }
 
 // Use shared utility
 const formatTime = formatRelativeTime;
-
-function startEditingTitle(session, event) {
-  event.stopPropagation();
-  event.preventDefault(); // Prevent <a> tag from navigating
-  editingSessionId.value = session.sessionId;
-  editingTitle.value = session.title || '';
-  nextTick(() => {
-    titleInputRef.value?.focus();
-    titleInputRef.value?.select();
-  });
-}
-
-function saveTitle() {
-  if (editingSessionId.value) {
-    setSessionTitle(editingSessionId.value, editingTitle.value);
-    editingSessionId.value = null;
-    editingTitle.value = '';
-  }
-}
-
-function cancelEditingTitle() {
-  editingSessionId.value = null;
-  editingTitle.value = '';
-}
-
-function getDisplayTitle(session) {
-  return session.title || session.firstPrompt;
-}
 
 function handleDeleteSession(sessionId, event) {
   event.stopPropagation();
@@ -115,15 +104,18 @@ function handleDeleteSession(sessionId, event) {
     <main class="main">
       <ul class="sessions">
         <!-- New Session as first item -->
-        <li class="session-item new-session" @click="startNewSession">
+        <li class="session-item new-session" :class="{ starting: startingSession }" @click="startNewSession">
           <div class="session-icon new">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg v-if="!startingSession" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 5v14M5 12h14"/>
+            </svg>
+            <svg v-else class="spin" width="20" height="20" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
             </svg>
           </div>
           <div class="session-content">
-            <p class="session-prompt">New Session</p>
-            <p class="session-meta">Start a fresh conversation</p>
+            <p class="session-prompt">{{ startingSession ? 'Starting session…' : 'New Session' }}</p>
+            <p class="session-meta">Spawns a Claude session on the VM</p>
           </div>
           <div class="session-arrow">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -149,36 +141,15 @@ function handleDeleteSession(sessionId, event) {
               </svg>
             </div>
             <div class="session-content">
-            <!-- Editing title -->
-            <form
-              v-if="editingSessionId === session.sessionId"
-              class="title-edit-form"
-              @submit.prevent="saveTitle"
-              @click.stop
-            >
-              <input
-                ref="titleInputRef"
-                type="text"
-                v-model="editingTitle"
-                class="title-input"
-                placeholder="Session title..."
-                @keydown.escape.prevent="cancelEditingTitle"
-                @blur="saveTitle"
+            <div class="session-title-row">
+              <p class="session-prompt truncate">{{ session.title || session.firstPrompt }}</p>
+              <RcBadge
+                v-if="liveBySessionId[session.sessionId]"
+                :entrypoint="liveBySessionId[session.sessionId].entrypoint"
+                :status="liveBySessionId[session.sessionId].status"
+                :rc-active="liveBySessionId[session.sessionId].rcActive"
               />
-            </form>
-            <!-- Display title -->
-            <div v-else class="session-title-row">
-              <p class="session-prompt truncate">{{ getDisplayTitle(session) }}</p>
-              <button
-                class="edit-title-btn"
-                @click="startEditingTitle(session, $event)"
-                title="Rename session"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-              </button>
+              <RcClaudeLink :live="liveBySessionId[session.sessionId]" />
             </div>
             <p v-if="session.title" class="session-subtitle truncate">{{ session.firstPrompt }}</p>
             <p class="session-meta">
@@ -186,6 +157,7 @@ function handleDeleteSession(sessionId, event) {
               <span class="separator">·</span>
               <span>{{ session.messageCount }} messages</span>
             </p>
+            <RcControls :session-id="session.sessionId" :project-slug="projectSlug" />
           </div>
             <div class="session-arrow">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -301,44 +273,6 @@ function handleDeleteSession(sessionId, event) {
   color: var(--text-primary);
 }
 
-.edit-title-btn {
-  opacity: 0;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-
-.session-item:hover .edit-title-btn {
-  opacity: 1;
-}
-
-.edit-title-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-}
-
-.title-edit-form {
-  margin-bottom: 4px;
-}
-
-.title-input {
-  width: 100%;
-  padding: 4px 8px;
-  font-size: 14px;
-  font-weight: 500;
-  background: var(--bg-primary);
-  border: 1px solid var(--text-muted);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-}
-
-.title-input:focus {
-  outline: none;
-  border-color: var(--text-secondary);
-}
-
 .session-subtitle {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -376,6 +310,11 @@ function handleDeleteSession(sessionId, event) {
 .session-arrow {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.session-item.new-session.starting {
+  opacity: 0.7;
+  cursor: wait;
 }
 
 .empty {

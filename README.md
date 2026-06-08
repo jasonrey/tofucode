@@ -1,15 +1,44 @@
 # tofucode
 
-Web UI for Claude Code with full system access. Run Claude through a browser interface on remote VMs, servers, or local machines.
+Companion web UI for **Claude Code Remote Control**. Run it on the VM where your `claude` sessions live and use it to start, monitor, search, and browse sessions from any device — then do the actual work in the Claude native app via Remote Control.
+
+## Why v2
+
+Claude now has a native remote story: the desktop app connects over SSH, and the mobile app attaches to any running `claude` session via Remote Control (`claude --rc`). But the native apps still can't:
+
+1. **Start a session on the VM** — RC only attaches to *already-running* sessions, and mobile has no SSH
+2. **Show SDK/cron session history** — automation sessions are hidden from the native resume picker
+3. **Search across sessions** — no cross-project full-text search
+4. **Create projects** — no folder creation/browsing
+
+tofucode v2 does exactly these four things, and nothing else.
+
+> **What happened to v1?** tofucode ≤ 1.5.0 was a full web chat UI over the Claude Agent SDK — prompt execution, terminal, file editor, git, MCP, Notion, Discord. It predates Claude's native remote support, which made that approach obsolete (and SDK-driven usage now bills against credits rather than subscription quota). v2 is a ground-up refocus; v1.5.0 remains on npm if you need the old behaviour.
+
+---
+
+## How it works
+
+```
+┌─ your phone / laptop ─────────────┐
+│  Claude app  ←─ remote control ─→ │ ─┐
+│  tofucode UI ←─── https/wss ────→ │ ─┼─→ ┌─ VM ──────────────────────┐
+└───────────────────────────────────┘  │   │  claude --rc  (session A) │
+                                       └─→ │  claude --rc  (session B) │
+                                           │  tofucode server          │
+                                           └───────────────────────────┘
+```
+
+- tofucode spawns `claude` processes under a PTY with remote control enabled
+- Each live session gets a `https://claude.ai/code/session_…` URL — tap it to open the session in the Claude app
+- Session history (JSONL under `~/.claude/projects/`) is browsable and searchable, including sessions the native app hides
 
 ---
 
 ## Quick Start
 
-### NPM
-
 ```bash
-# Run directly with npx (recommended)
+# Run directly with npx
 npx tofucode
 
 # Or install globally
@@ -17,86 +46,57 @@ npm install -g tofucode
 tofucode
 ```
 
-Open http://localhost:3000 and start chatting.
+Open http://localhost:3000, set a password, and you're in.
 
-### Docker
-
-```bash
-# Pull and run
-docker run -d \
-  -p 3000:3000 \
-  -e ANTHROPIC_API_KEY=your_key_here \
-  -v $(pwd):/workspace \
-  picotofu/tofucode:latest --root /workspace
-
-# Open http://localhost:3000
-```
-
-**Mount Points:**
-- `/home/node/.claude/.credentials.json` - required - API credentials (isolated, recommended)
-- `/home/node/.claude` - required - full Claude config (alternative, for host interop)
-- `ANTHROPIC_API_KEY` env var - required - API key (alternative)
-- `/workspace` - recommended - project directory (always pair with `--root /workspace`)
-- `/home/node/.tofucode` - optional - auth, settings, state storage
-
-**Note:** Only one API authentication method is required (credentials file, full `.claude` folder, or env var)
-
-**Project root:** Always pass `--root` to tell tofucode where your projects live. Without it, the app falls back to `$HOME` (`/home/node`), which is an empty directory unless you mount something there.
-
-**Git credentials:** `git` and `openssh-client` are included in the image. Mount your SSH key and git config to enable git operations:
-```bash
--v ~/.ssh:/home/node/.ssh:ro \
--v ~/.gitconfig:/home/node/.gitconfig:ro \
-```
-
-See [Docker Guide](./docs/DOCKER.md) for all configuration options.
-
----
-
-## Screenshots
-
-### Homepage
-![Homepage](https://raw.githubusercontent.com/picotofu/tofucode/main/samples/homepage.png)
-
-### Chat View
-![Chat View](https://raw.githubusercontent.com/picotofu/tofucode/main/samples/chat-view.png)
-
-### Terminal Mode
-![Terminal Mode](https://raw.githubusercontent.com/picotofu/tofucode/main/samples/terminal-view.png)
-
-### Files Browser
-![Files Browser](https://raw.githubusercontent.com/picotofu/tofucode/main/samples/files-view.png)
-
-### Markdown Editor
-![Markdown Editor](https://raw.githubusercontent.com/picotofu/tofucode/main/samples/editor-view.png)
-
----
-
-## Requirements
+### Prerequisites
 
 - **Node.js 18+**
-- **Claude Code** installed and configured with API key
-- **Anthropic API key** configured in Claude Code
+- **Claude Code** (`claude` CLI) installed and authenticated on the same machine
+- **Remote control at startup** enabled, so every session registers for RC:
+
+```json
+// ~/.claude/settings.json
+{
+  "remoteControlAtStartup": true
+}
+```
+
+- A claude.ai subscription (Pro/Max/Team/Enterprise) with OAuth login — Remote Control does not work with API-key auth
 
 ---
 
-## Setup
+## Features
 
-### 1. Install Claude Code
+### Session launcher
+- Start a new `claude` session in any project folder — from your phone
+- Resume existing sessions (with consent prompt if history is missing)
+- Stop sessions safely (PID identity is validated before kill — no killing recycled PIDs)
+- Live status: busy/idle, remote connected, PID, claude.ai URL
 
-Follow the [Claude Code installation guide](https://github.com/anthropics/claude-agent-sdk) to set up the `claude` CLI with your API key.
+### Session browser
+- Sessions grouped by project in the sidebar (Recent tab), or a flat list of running sessions (Live tab)
+- Full read-only history view with tool calls, compaction summaries, and pagination
+- Session titles (rename inline), session deletion
+- SDK/cron/automation sessions visible — the ones the native app hides
 
-### 2. First Run
+### Search
+- `Ctrl+K` — full-text search across every session in every project, with match snippets
 
-```bash
-npx tofucode
-```
+### Projects
+- Folder browser as the landing page — open any folder's session list
+- Create new project folders from the UI
 
-On first run:
-1. Open http://localhost:3000
-2. Create a password
-3. Select a project from `~/.claude/projects/` or browse to a folder
-4. Start chatting
+### Platform
+- Password auth (argon2, rate-limited), PWA installable, auto-update notifications
+- Live status polls every 10s so the UI tracks session readiness without refresh
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl/Cmd+K` | Search sessions |
+| `Ctrl/Cmd+B` | Toggle sidebar |
+| `Ctrl/Cmd+,` | Settings |
 
 ---
 
@@ -118,11 +118,8 @@ tofucode stop
 tofucode restart
 tofucode status
 
-# Restrict access to a specific directory
-tofucode start --root /path/to/project
-
-# Use config file
-tofucode start --config prod.json
+# Restrict browsing to a specific directory
+tofucode start --root /path/to/projects
 
 # See all options
 tofucode --help
@@ -130,11 +127,7 @@ tofucode --help
 
 ### Configuration
 
-**Three ways to configure (priority order):**
-
-1. **CLI arguments:** `tofucode start -p 8080 --debug`
-2. **Config file:** `tofucode start --config prod.json` (see `config.example.json`)
-3. **Environment variables:** `PORT=8080 DEBUG=true tofucode`
+Priority order: CLI arguments → config file (`--config prod.json`) → environment variables.
 
 | Setting | CLI | Config | Env Var |
 |---------|-----|--------|---------|
@@ -144,325 +137,50 @@ tofucode --help
 | Daemon | `-d` | `"daemon": true` | - |
 | Debug | `--debug` | `"debug": true` | `DEBUG=true` |
 | Log file | `--log-file <path>` | `"logFile": "<path>"` | `LOG_FILE=<path>` |
-| Bypass token | `--bypass-token <token>` | `"bypassToken": "<token>"` | `DEBUG_TOKEN=<token>` |
 | Root path | `--root <path>` | `"root": "<path>"` | `ROOT_PATH=<path>` |
-| Max file size (MB) | - | `"maxFileSizeMb": 10` | `MAX_FILE_SIZE_MB=10` |
+| Login attempts | - | - | `MAX_LOGIN_ATTEMPTS=3` |
+| Lockout window | - | - | `LOGIN_WINDOW_MS=900000` |
 | Disable update check | - | - | `DISABLE_UPDATE_CHECK=true` |
-| Update check interval | - | - | `UPDATE_CHECK_INTERVAL=3600000` |
-| Model: Haiku | - | - | `MODEL_HAIKU_SLUG=claude-haiku-4-5` |
-| Model: Sonnet | - | - | `MODEL_SONNET_SLUG=claude-sonnet-4-6` |
-| Model: Opus | - | - | `MODEL_OPUS_SLUG=claude-opus-4-6` |
 
-Run `tofucode --help` for all options.
+### Root path restriction
 
-### Model Configuration
-
-By default, tofucode uses the latest Claude model versions:
-- **Haiku:** `claude-haiku-4-5`
-- **Sonnet:** `claude-sonnet-4-6`
-- **Opus:** `claude-opus-4-6`
-
-You can override these defaults using environment variables:
-
-```bash
-# Use specific model versions
-MODEL_SONNET_SLUG=claude-sonnet-4-5-20250929 \
-MODEL_OPUS_SLUG=claude-opus-4-5-20251101 \
-tofucode
-```
-
-Or in your `.env` file:
-
-```bash
-MODEL_HAIKU_SLUG=claude-haiku-4-5
-MODEL_SONNET_SLUG=claude-sonnet-4-6
-MODEL_OPUS_SLUG=claude-opus-4-6
-```
-
-This allows you to:
-- Pin to specific model versions with snapshot dates
-- Use legacy models if needed
-- Test new models as they're released
-
-See the [Anthropic Models documentation](https://docs.anthropic.com/en/docs/models-overview) for all available model identifiers.
-
-### Security: Root Path Restriction
-
-Use `--root` to restrict file and terminal access to a specific directory:
-
-```bash
-tofucode start --root /home/user/projects/myapp
-```
-
-**What it does:**
-- Limits Files tab navigation to the specified directory
-- Validates terminal working directory (best effort)
-- Filters project/session lists to only show items within the root
-- Displays a "Restricted Mode" banner on the homepage
-
-**⚠️ Important: Best Effort Basis**
-
-The `--root` restriction is **not foolproof**:
-- File access is strictly validated ✅
-- Terminal CWD is validated ✅
-- But users can still run commands like `cat /etc/passwd` or `cd /` ⚠️
-
-**For full isolation, use Docker:**
-
-```bash
-docker run -d \
-  -p 3000:3000 \
-  -e ANTHROPIC_API_KEY=your_key_here \
-  -e ROOT_PATH=/workspace \
-  -v /path/to/project:/workspace \
-  picotofu/tofucode:latest --root /workspace
-```
-
-Docker provides OS-level isolation that cannot be bypassed. See the [Docker Guide](./docs/DOCKER.md) for flexible volume mounting strategies.
-
----
-
-## Features
-
-### Core
-- **Chat Interface** - Markdown rendering, syntax highlighting, collapsible tool outputs
-- **Terminal Mode** - Shell commands with streaming output, history, bookmarks, and process watch mode
-- **Files Mode** - Browse, edit, and preview files (markdown, CSV, images)
-- **Session Management** - Multiple sessions with quick switcher (Cmd+K)
-- **Permission Modes** - Control Claude's access (Default/Plan/Bypass/Skip)
-
-### Collaboration
-- **Interactive Questions** - Claude can ask questions with selectable answers
-- **Plan Mode** - Review implementation plans before execution
-- **Git Integration** - View diffs and file changes
-- **Memo Feature** - Quick-access notes (Cmd+M)
-
-### Platform
-- **Multi-tab Support** - Session isolation and conflict warnings
-- **Authentication** - Password protection (enabled by default)
-- **PWA Support** - Install as standalone app on desktop/mobile
-- **Auto-Update** - One-click upgrades for npm installs
-- **Docker Ready** - Multi-arch images with flexible mounting
-- **MCP Manager** - View, add, edit, and remove MCP servers (HTTP/SSE full CRUD, stdio config management, OAuth read-only display) via plug icon in sidebar
-
-### Keyboard Shortcuts
-
-**Global:**
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl/Cmd+K` | Quick session switcher / folder browser |
-| `Ctrl/Cmd+P` | File picker |
-| `Ctrl/Cmd+B` | Toggle sidebar |
-| `Ctrl/Cmd+,` | Open settings |
-| `Ctrl/Cmd+1` | Sidebar: Sessions tab |
-| `Ctrl/Cmd+2` | Sidebar: Projects tab |
-| `Ctrl/Cmd+3` | Sidebar: Tasks tab |
-| `Ctrl/Cmd+4` | Sidebar: Notes tab |
-| `Ctrl/Cmd+D` | Jump to today's daily note |
-| `Ctrl/Cmd+M` | Open memo |
-| `Ctrl/Cmd+L` | Scroll to bottom (chat mode) |
-| `Ctrl/Cmd+[` | Cycle model (Haiku → Sonnet → Opus) |
-| `Ctrl/Cmd+]` | Cycle permission mode (Default → Plan → Accept Edits → Bypass) |
-| `Ctrl/Cmd+Enter` | Submit message (chat) / Run command (terminal) |
-| `Ctrl/Cmd+↑` | Navigate to previous conversation turn (chat mode) |
-| `Ctrl/Cmd+↓` | Navigate to next conversation turn (chat mode) |
-| `Escape` | Close modals / Blur input |
-
-**Terminal Mode:**
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+C` | Clear current input |
-| `Ctrl+U` | Clear from cursor to start |
-| `Ctrl+K` | Clear from cursor to end |
-| `Ctrl+A` | Move cursor to start |
-| `Ctrl+E` | Move cursor to end |
-| `Ctrl+L` | Clear input |
-| `↑` / `↓` | Navigate command history |
-
----
-
-## Settings
-
-Access settings via the gear icon in the sidebar. Settings are persisted in `~/.tofucode/settings.json`.
-
-**Available Settings:**
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Debug Mode** | Off | Hover over UI elements to see their ID and class names for development |
-| **Auto-save Files** | On | Automatically save file changes after 1 second of inactivity in Files mode |
-| **Symbol Toolbar** | Top row + ` ~ / | Customize symbols shown in the file editor toolbar for quick insertion |
-
-**Tips:**
-- Settings apply across all sessions and persist after server restart
-- Changes take effect immediately without reload
-- Use `Ctrl/Cmd+S` for immediate manual save when auto-save is disabled
-
----
-
-## Progressive Web App (PWA)
-
-tofucode can be installed as a standalone application on desktop and mobile devices:
-
-### Installing as an App
-
-**Desktop (Chrome/Edge/Brave):**
-1. Open tofucode in your browser
-2. Click the install icon (⊕) in the address bar
-3. Click "Install" in the prompt
-4. Launch from desktop/start menu like any native app
-
-**Mobile (iOS/Android):**
-1. Open tofucode in Safari (iOS) or Chrome (Android)
-2. Tap the Share button (iOS) or Menu (Android)
-3. Select "Add to Home Screen"
-4. Launch from home screen
-
-### Benefits
-
-- **Standalone window** - Runs without browser chrome (no address bar/tabs)
-- **Desktop/dock icon** - Quick launch like native applications
-- **Offline UI** - App shell loads instantly (requires connection for chat)
-- **Better mobile experience** - Full-screen on mobile devices
-- **Auto-update notifications** - Get prompted when new versions are available
-
-### How Updates Work
-
-The PWA uses service workers to detect when the frontend code changes:
-
-1. **Automatic detection** - Service worker checks for updates on page navigation
-2. **Update prompt** - When a new version is available, you'll see a prompt to reload
-3. **One-click update** - Click "Update" to activate the new version instantly
-4. **Content-addressed caching** - Any JS/CSS change triggers an update notification
-
-The PWA updates independently from the backend npm package. For full updates (backend + frontend), use the upgrade button in settings.
-
----
-
-## Discord Bot
-
-tofucode supports a bring-your-own-bot Discord integration, letting you run Claude Code sessions from Discord threads.
-
-- Each Discord **channel** maps to one project
-- Each Discord **thread** is an isolated Claude Code session
-- Sessions are shared with the Web UI — continue in either interface
-- Web UI prompts are mirrored to Discord automatically (toggle in Settings → Discord)
-- Slash commands: `/setup`, `/session`, `/resume`, `/cancel`, `/list`, `/status`
-
-See the **[Discord Setup Guide](./docs/DISCORD_SETUP_GUIDE.md)** for full setup instructions, configuration options, and command reference.
-
----
-
-## Task Management
-
-tofucode includes a built-in task panel (sidebar **Tasks** tab, or press `T`) backed by Notion.
-
-- **Browse & filter** — filter by assignee (self / anyone / specific person) and status; live title search
-- **Grouping** — automatically groups by assignee when "Anyone" is selected, by status when all statuses are shown, or both together (assignee outer → status inner); status groups follow Notion's To-do → In Progress → Done category order
-- **Task detail** — click any task to open a detail view with editable title, status, assignee, and body
-- **Create tickets** — create new Notion tickets directly from the sidebar
-
-**Setup:** Configure your Notion API token and database URL in **Settings → Notion**.
+`--root` limits folder browsing and project/session listings to a directory subtree. It is **best-effort** — the spawned `claude` sessions themselves have whatever access your user has. For real isolation, run in Docker.
 
 ---
 
 ## Security
 
-- **Authentication enabled by default** - Set password on first run
-- Use `--no-auth` only on trusted/local networks
-- Sessions stored locally in `~/.claude/projects/`
-- Auth data in `~/.tofucode/.auth.json`
-- Full system access matching Claude Code permissions
-- **Login rate limiting** - Brute-force protection on login and setup endpoints (3 attempts, 15-min lockout by default). Auth page shows attempts remaining and a live countdown on lockout. Lock clears on successful login, window expiry, or server restart. Configurable via `MAX_LOGIN_ATTEMPTS` and `LOGIN_WINDOW_MS`.
+- **Authentication enabled by default** — password set on first run, argon2-hashed, cookie sessions
+- **Login rate limiting** — 3 attempts, 15-min lockout (configurable)
+- Spawned sessions run as your user with `--dangerously-skip-permissions` by default — treat the UI password as the keys to the VM, and put it behind HTTPS (reverse proxy) for remote access
+- Auth data in `~/.tofucode/`, session data in `~/.claude/projects/`
 
 ### Security Reports
 
-Independent security assessments are conducted before each release to ensure user safety:
+Independent assessments before each release, in [`docs/`](./docs):
 
-- **[v1.5.0 Security Report](./docs/security_report_v1.5.0.md)** - Session branching, btw injection, rewind, effort selector, debug log sanitisation, dependency audit
-- **[v1.4.0 Security Report](./docs/security_report_v1.4.0.md)** - Kanban board, task delete, label management, board filters, dependency audit
-- **[v1.3.0 Security Report](./docs/security_report_v1.3.0.md)** - Notes feature, Notion task integration, file browser enhancements, Discord bot, dependency audit
-- **[v1.2.1 Security Report](./docs/security_report_v1.2.1.md)** - Multer DoS fix, DOMPurify XSS fix, new feature code review (no issues found)
-- **[v1.2.0 Security Report](./docs/security_report_v1.2.0.md)** - Upload path injection fix, symlink escape prevention, error info leaks, draft entry limits
-- **[v1.1.0 Security Report](./docs/security_report_v1.1.0.md)** - WebSocket hardening, security headers, auth improvements, process file permissions
-- **[v1.0.5 Security Report](./docs/security_report_v1.0.5.md)** - Command injection fix, input validation hardening, DoS protection
-- **[v1.0.4 Security Report](./docs/security_report_v1.0.4.md)** - Code review, file access hardening, session security, dependency audit
-- **[v1.0.3 Security Report](./docs/security_report_v1.0.3.md)** - WebSocket auth, file access, CORS, penetration testing
-
-All security reports are publicly available in the `docs/` folder for transparency.
+- **[v1.5.0 Security Report](./docs/security_report_v1.5.0.md)** — last v1 release
+- Older reports: v1.0.3 – v1.4.0 in the same folder
 
 ---
 
 ## Contributing
 
-### Development Setup
-
 ```bash
-# Clone repository
 git clone <repo-url>
 cd tofucode
-
-# Install dependencies
 npm install
-
-# Start dev server
-npm run dev
-
-# Open http://localhost:3000
+npm run dev      # backend (nodemon, manual restart: rs + Enter) + Vite
+npm run check    # Biome lint + format
+npm run build    # production frontend build
 ```
 
-### Development Workflow
-
-1. **Make changes** to frontend (`src/`) or backend (`server/`)
-2. **Frontend:** Auto-reloads via Vite HMR
-3. **Backend:** Press `rs` + Enter in nodemon terminal to restart
-4. **Check logs:** `tail -f dev.log`
-5. **Run checks:** `npm run check` (linting + formatting)
-6. **Build:** `npm run build`
-
-### Code Style
-
-- **Always run `npm run check`** after implementation (Biome linting + formatting)
-- Rebuild frontend with `npm run build` after code changes
-- Follow existing patterns in the codebase
-- Write clear commit messages
-
-### Project Documentation
-
-- **[CLAUDE.md](./CLAUDE.md)** - Development guide and workflow
-- **[PLAN.md](./PLAN.md)** - Architecture and technical overview
-- **[CHANGELOG.md](./CHANGELOG.md)** - Release notes
-
-### Feature Documentation
-
-The [`docs/`](./docs) folder is organized by implementation status:
-
-- **[`docs/completed/`](./docs/completed)** - Completed features (Terminal, File Explorer, PWA, etc.)
-- **[`docs/todo/`](./docs/todo)** - Planned features and ideas (Claude Interactivity, File Mentions, etc.)
-- **[`docs/`](./docs)** - Reference documentation (DOCKER.md, STYLEGUIDE.md)
-
-### Testing
-
-No automated test suite yet. Manual testing workflow:
-
-1. Test chat functionality (prompts, responses, tools)
-2. Test terminal mode (commands, output, history)
-3. Test files mode (browse, edit, save)
-4. Test session management (create, switch, rename)
-5. Test permission modes (default, plan, bypass)
-6. Test authentication flow (setup, login, logout)
-7. Test multi-tab behavior (warnings, synchronization)
+- **[CLAUDE.md](./CLAUDE.md)** — architecture, key concepts, development workflow
+- **[docs/backend-spec-v2.md](./docs/backend-spec-v2.md)** — WebSocket event reference
+- **[CHANGELOG.md](./CHANGELOG.md)** — release notes
 
 ---
 
 ## License
 
 MIT
-
----
-
-## Support
-
-- **Issues:** Report bugs or feature requests on GitHub
-- **Documentation:** See [CLAUDE.md](./CLAUDE.md) for development guide
-- **Architecture:** See [PLAN.md](./PLAN.md) for technical overview

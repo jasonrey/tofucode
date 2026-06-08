@@ -1,31 +1,17 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { formatRelativeTime, formatToolDisplay } from '../utils/format.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import DiffViewer from './DiffViewer.vue';
 
 const props = defineProps({
   message: Object,
-  rewindable: {
-    type: Boolean,
-    default: false,
-  },
 });
 
-const emit = defineEmits(['answer-question', 'rewind']);
+const emit = defineEmits(['answer-question']);
 
 const resultExpanded = ref(false);
 const finalResultExpanded = ref(false);
 const copySuccess = ref(false);
-const rewindConfirm = ref(false);
-
-// Reset confirm strip if rewindable becomes false (e.g. task starts while confirm is open)
-watch(
-  () => props.rewindable,
-  (val) => {
-    if (!val) rewindConfirm.value = false;
-  },
-);
 
 async function copyMessageContent() {
   const rawContent = (props.message.content || '')
@@ -193,16 +179,6 @@ const toolDisplay = computed(() => {
   return formatToolDisplay(props.message.tool, props.message.input);
 });
 
-// Check if this is an Edit tool use with diff info
-const isEditTool = computed(() => {
-  return (
-    messageType.value === 'tool_use' &&
-    props.message.tool === 'Edit' &&
-    props.message.input?.old_string &&
-    props.message.input?.new_string
-  );
-});
-
 // Check if this is ExitPlanMode with plan content
 const isExitPlanMode = computed(() => {
   return (
@@ -288,20 +264,6 @@ function togglePlanExpand() {
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
-        <!-- Rewind: confirm strip or button -->
-        <template v-if="rewindable">
-          <div v-if="rewindConfirm" class="rewind-confirm" @click.stop>
-            <span class="rewind-confirm-text">rewind from here? file changes stay</span>
-            <button class="rewind-confirm-yes" @click="emit('rewind'); rewindConfirm = false">yes</button>
-            <button class="rewind-confirm-cancel" @click="rewindConfirm = false">×</button>
-          </div>
-          <button v-else class="msg-rewind-btn" @click.stop="rewindConfirm = true" title="Rewind to here — remove this turn and everything after it">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-              <path d="M3 3v5h5"/>
-            </svg>
-          </button>
-        </template>
         <span v-if="isBtwMessage" class="btw-badge" title="Injected into running session">btw</span>
         <span
           class="mode-badge"
@@ -349,14 +311,6 @@ function togglePlanExpand() {
         <small v-if="toolDisplay.secondary && toolDisplay.type !== 'json'" class="tool-description">{{ toolDisplay.secondary }}</small>
       </div>
 
-      <!-- Show diff for Edit tool -->
-      <div v-if="isEditTool" class="tool-diff-section">
-        <DiffViewer
-          :old-content="message.input.old_string"
-          :new-content="message.input.new_string"
-          :filename="message.input.file_path"
-        />
-      </div>
 
       <!-- Show plan content for ExitPlanMode -->
       <div v-if="isExitPlanMode" class="tool-plan-section">
@@ -550,73 +504,6 @@ function togglePlanExpand() {
 .user-message:hover .msg-copy-btn,
 .text-message:hover .msg-copy-btn {
   opacity: 1;
-}
-
-/* Rewind button */
-.msg-rewind-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 4px;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-muted);
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
-}
-
-.msg-rewind-btn:hover {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.1);
-}
-
-.user-message:hover .msg-rewind-btn {
-  opacity: 1;
-}
-
-/* Rewind inline confirmation strip */
-.rewind-confirm {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-}
-
-.rewind-confirm-text {
-  color: var(--text-muted);
-}
-
-.rewind-confirm-yes {
-  padding: 1px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 4px;
-  border: 1px solid rgba(248, 113, 113, 0.5);
-  background: rgba(248, 113, 113, 0.1);
-  color: #f87171;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.rewind-confirm-yes:hover {
-  background: rgba(248, 113, 113, 0.2);
-}
-
-.rewind-confirm-cancel {
-  padding: 1px 6px;
-  font-size: 13px;
-  font-weight: 600;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.15s;
-}
-
-.rewind-confirm-cancel:hover {
-  color: var(--text-primary);
 }
 
 .model-badge {

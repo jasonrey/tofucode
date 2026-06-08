@@ -5,10 +5,36 @@ All notable changes to tofucode.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - Unreleased
+
+### Changed
+- **Complete refocus: web chat UI → Remote Control companion.** v1 executed prompts through the Claude Agent SDK because Claude had no native mobile/remote story. With the desktop app's SSH environments, the mobile app's Remote Control, and SDK usage moving to credit billing, v2 strips tofucode to the four gaps the native apps leave open: starting/stopping sessions on the VM, browsing hidden SDK/cron session history, cross-session search, and project creation. Interaction now happens in the Claude native app via the session's remote URL.
+- **UI shell rewritten** — folder browser as the landing page; sidebar unified into a single list of projects grouped by recent session activity (collapsible, per-project new-session button) with **Recent | Live** tabs (Live = flat list of running sessions with project subtitle); chat view reduced to a read-only history viewer; bottom bar, sidebar tab plumbing, and per-view hamburger wiring removed
+- `Ctrl+K` palette is now search-only (project creation moved to a dedicated modal); keyboard shortcuts reduced to `Ctrl+K` / `Ctrl+B` / `Ctrl+,`
+- Settings reduced to General (debug mode) and Auth tabs
+
+### Added
+- **RC session manager** — start, resume, and stop `claude` sessions on the VM via new `rc:list` / `rc:start` / `rc:stop` WebSocket events
+  - Live session registry backed by `~/.claude/sessions/{pid}.json`, with PID-reuse-safe liveness validation (`/proc/{pid}/stat` procStart comparison)
+  - Sessions spawned under node-pty (claude's REPL exits without a TTY) with remote control enabled; idempotent start (already-running sessions are returned, not double-spawned); stop re-validates process identity before killing
+  - Resume-with-consent flow: missing session history prompts before falling back to a new session
+- **Remote URL surfacing** — live sessions with a connected RC bridge show their `https://claude.ai/code/…` link in the sidebar, session list, and chat view
+- **Chat session panel** — bottom panel in the chat view with session id (click to copy), PID / busy-idle / remote-connection status, remote URL, and start/stop controls
+- **Cross-session full-text search** (`search:sessions`) — streaming JSONL grep across all projects with AND semantics and match snippets, including SDK/automation sessions the native app hides; wired to the `Ctrl+K` palette
+- **Project creation** (`project:create`) — create folders from the folder browser (landing page and New Project modal share the same create form)
+- **Live status polling** — `rc:list` polled every 10s while the tab is visible (immediate refresh on tab focus), so session readiness, remote URL, and stop buttons update without a manual refresh
+- **Idempotent `tofucode restart`** — acts as start-or-restart: stops the daemon if running (cleaning up stale PID files), then starts with the given options/config; plain start when nothing is running
+- Backend WebSocket spec at `docs/backend-spec-v2.md`
+
+### Removed
+- Chat execution and the Claude Agent SDK dependency (prompts, queue, drafts, rewind, fork, compact, AskUserQuestion, permission modes, effort selector)
+- Terminal mode, file browser/editor (markdown/CSV), git integration (diff, clone), ports panel
+- MCP manager, Notion integration (tasks, board, notes, ticket creation), usage stats
+- Discord bot integration
+- ~39k lines net
 
 ### Fixed
-- **Background task notifications** — `task_notification` messages emitted by the SDK after the main turn ends (when a background Bash process completes) were silently dropped due to a missing handler in the stream loop; notifications now broadcast to session watchers and render as an indigo bubble in the chat; same fix applied to the Discord executor
+- `tofucode restart` leaked its lock file (the parent exited before cleanup ran), making any second restart within 30 seconds fail with "restart already in progress"
 
 ## [1.5.0] - 2026-05-03
 

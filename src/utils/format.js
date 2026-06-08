@@ -1,5 +1,3 @@
-import { getMcpToolDisplay } from './mcp-tools/index.js';
-
 /**
  * Format a date string as a relative time (e.g., "5m ago", "2h ago")
  * @param {string|Date} dateStr - Date string or Date object
@@ -230,15 +228,11 @@ export function formatToolDisplay(tool, input = {}) {
     const parts = tool.split('__');
     const server = parts[1] || 'mcp';
     const toolName = parts[2] || tool;
-
-    // Get MCP-specific display based on known tools
-    const mcpDisplay = getMcpToolDisplay(server, toolName, input);
-
     return {
-      icon: mcpDisplay.icon || '🔌',
-      primary: mcpDisplay.primary || toolName,
-      secondary: mcpDisplay.secondary || `MCP: ${server}`,
-      type: mcpDisplay.type || 'mcp',
+      icon: '🔌',
+      primary: toolName,
+      secondary: `MCP: ${server}`,
+      type: 'mcp',
     };
   }
 

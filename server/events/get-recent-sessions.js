@@ -34,8 +34,24 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { config, getProjectDisplayName, slugToPath } from '../config.js';
 import { logger } from '../lib/logger.js';
-import { loadTitles } from '../lib/session-titles.js';
 import { send } from '../lib/ws.js';
+
+// Read Claude Code's native ai-title from the first line of a JSONL file.
+// Claude Code writes the ai-title as the very first entry when a session gets a name.
+function readNativeTitle(jsonlPath) {
+  if (!existsSync(jsonlPath)) return null;
+  try {
+    const content = readFileSync(jsonlPath, 'utf-8');
+    const firstLine = content.split('\n')[0]?.trim();
+    if (firstLine) {
+      const entry = JSON.parse(firstLine);
+      if (entry.type === 'ai-title' && entry.aiTitle) return entry.aiTitle;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 
 export function handler(ws, message) {
   const limit = message.limit || 50;
@@ -73,9 +89,6 @@ export function handler(ws, message) {
           }
         }
 
-        // Load custom titles from .session-titles.json (SDK-safe storage)
-        const titles = loadTitles(projectSlug);
-
         // Track sessions we've already added for this project
         const sessionIds = new Set();
 
@@ -111,8 +124,9 @@ export function handler(ws, message) {
                 messageCount: session.messageCount || 0,
                 created: session.created,
                 modified,
-                // Use .session-titles.json (SDK overwrites sessions-index.json customTitle)
-                title: titles[session.sessionId] || null,
+                title: readNativeTitle(
+                  join(sessionsDir, `${session.sessionId}.jsonl`),
+                ),
               };
 
               // Keep the most recent version if duplicate sessionId across projects
@@ -146,6 +160,7 @@ export function handler(ws, message) {
                 const stats = statSync(jsonlPath);
                 // Read file to get first prompt and count messages
                 let firstPrompt = 'New session';
+                let title = null;
                 let messageCount = 0;
                 try {
                   const content = readFileSync(jsonlPath, 'utf-8');
@@ -154,27 +169,36 @@ export function handler(ws, message) {
                     .filter((line) => line.trim());
                   messageCount = lines.length;
 
-                  const firstLine = lines[0];
-                  if (firstLine) {
-                    const jsonEntry = JSON.parse(firstLine);
-                    if (
-                      jsonEntry.type === 'user' &&
-                      jsonEntry.message?.content
-                    ) {
-                      const contentText =
-                        typeof jsonEntry.message.content === 'string'
-                          ? jsonEntry.message.content
-                          : Array.isArray(jsonEntry.message.content)
+                  for (const line of lines) {
+                    try {
+                      const jsonEntry = JSON.parse(line);
+                      if (jsonEntry.type === 'ai-title' && jsonEntry.aiTitle) {
+                        title = jsonEntry.aiTitle;
+                      } else if (
+                        firstPrompt === 'New session' &&
+                        jsonEntry.type === 'user' &&
+                        jsonEntry.message?.content
+                      ) {
+                        const contentText =
+                          typeof jsonEntry.message.content === 'string'
                             ? jsonEntry.message.content
-                                .filter((b) => b.type === 'text')
-                                .map((b) => b.text)
-                                .join(' ')
-                            : 'New session';
-                      firstPrompt = contentText.substring(0, 100);
+                            : Array.isArray(jsonEntry.message.content)
+                              ? jsonEntry.message.content
+                                  .filter((b) => b.type === 'text')
+                                  .map((b) => b.text)
+                                  .join(' ')
+                              : '';
+                        if (contentText.trim()) {
+                          firstPrompt = contentText.substring(0, 100);
+                        }
+                      }
+                      if (title && firstPrompt !== 'New session') break;
+                    } catch {
+                      // skip malformed line
                     }
                   }
                 } catch {
-                  // Couldn't read first prompt, use default
+                  // Couldn't read file, use defaults
                 }
 
                 const modified = stats.mtime.toISOString();
@@ -187,7 +211,7 @@ export function handler(ws, message) {
                   messageCount,
                   created: stats.birthtime.toISOString(),
                   modified,
-                  title: titles[sessionId] || null,
+                  title,
                 };
 
                 // Keep the most recent version if duplicate sessionId across projects

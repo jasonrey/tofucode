@@ -1,82 +1,184 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, inject, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWebSocket } from '../composables/useWebSocket';
-import { formatRelativeTime } from '../utils/format.js';
-import NotesPanel from './NotesPanel.vue';
-import TasksPanel from './TasksPanel.vue';
+import RcBadge from './RcBadge.vue';
+import RcClaudeLink from './RcClaudeLink.vue';
+import SidebarProjectGroup from './SidebarProjectGroup.vue';
 
 const props = defineProps({
   open: {
     type: Boolean,
     default: true,
   },
-  activeTab: {
-    type: String,
-    default: null,
-  },
-  notionEnabled: {
-    type: Boolean,
-    default: false,
-  },
 });
 
-const emit = defineEmits(['close', 'open-settings', 'new-project']);
+const emit = defineEmits(['close', 'open-settings']);
 
 const route = useRoute();
 const router = useRouter();
 const {
   connected,
-  projects,
   recentSessions,
   sessionsReady,
-  sessionStatuses,
-  terminalCounts,
   currentVersion,
   updateAvailable,
-  tasks,
-  tasksReady,
-  tasksError,
-  tasksNextCursor,
-  tasksFilter,
-  taskStatusOptions,
-  taskAssignees,
-  taskSelfId,
-  getProjects,
+  liveSessions,
+  liveBySessionId,
   getRecentSessionsImmediate,
-  getTasks,
-  loadMoreTasks,
-  setTasksFilter,
-  getTaskStatusOptions,
-  getTaskAssignees,
+  listRcSessions,
+  startNewRcSession,
   dismissUpdate,
   send,
   onMessage,
-  openCloneDialog,
 } = useWebSocket();
 
-// Resolved active tab — falls back to 'sessions' when null (sidebar closed state)
-const resolvedTab = computed(() => props.activeTab ?? 'sessions');
+const newProject = inject('newProject', null);
 
-// Project sort state (default: recent first; true = A-Z)
-const sortAZ = ref(false);
+// ── Tabs: recent (grouped) | live (flat, running sessions) ──
+const TAB_KEY = 'tofucode:sidebar-tab';
+const activeTab = ref(
+  localStorage.getItem(TAB_KEY) === 'live' ? 'live' : 'recent',
+);
 
-const sortedProjects = computed(() => {
-  if (!sortAZ.value) return projects.value;
-  return [...projects.value].sort((a, b) => a.name.localeCompare(b.name));
+function setTab(tab) {
+  activeTab.value = tab;
+  localStorage.setItem(TAB_KEY, tab);
+}
+
+// ── Unified project groups from recent sessions ─────────────
+const groups = computed(() => {
+  const map = new Map();
+  for (const session of recentSessions.value) {
+    let group = map.get(session.projectSlug);
+    if (!group) {
+      group = {
+        slug: session.projectSlug,
+        name: session.projectName,
+        path: session.projectPath,
+        sessions: [],
+        lastModified: session.modified,
+      };
+      map.set(session.projectSlug, group);
+    }
+    group.sessions.push(session);
+    if (session.modified > group.lastModified) {
+      group.lastModified = session.modified;
+    }
+  }
+  return [...map.values()].sort((a, b) =>
+    (b.lastModified || '').localeCompare(a.lastModified || ''),
+  );
 });
 
-// Upgrade state
+// ── Expand/collapse state (persisted) ───────────────────────
+const EXPANDED_KEY = 'tofucode:expanded-projects';
+
+function loadExpanded() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]');
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const expanded = reactive(loadExpanded());
+
+function toggleGroup(slug) {
+  if (expanded.has(slug)) {
+    expanded.delete(slug);
+  } else {
+    expanded.add(slug);
+  }
+  localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded]));
+}
+
+// Auto-expand the current route's project
+watch(
+  () => route.params.project,
+  (slug) => {
+    if (slug && !expanded.has(slug)) {
+      expanded.add(slug);
+    }
+  },
+  { immediate: true },
+);
+
+const currentSession = computed(() => route.params.session ?? null);
+
+// ── New session (rc:start via shared serialized action) ─────
+const startingSlug = ref(null);
+
+async function startNewSession(group) {
+  if (startingSlug.value) return;
+  startingSlug.value = group.slug;
+  try {
+    const result = await startNewRcSession(group.slug);
+    if (result.sessionId) {
+      router.push({
+        name: 'chat',
+        params: { project: group.slug, session: result.sessionId },
+      });
+    } else {
+      alert(result.message || 'Failed to start session');
+    }
+  } catch (err) {
+    alert(`Failed to start session: ${err.message}`);
+  } finally {
+    startingSlug.value = null;
+  }
+}
+
+function openSession(group, session) {
+  router.push({
+    name: 'chat',
+    params: { project: group.slug, session: session.sessionId },
+  });
+}
+
+function viewAll(group) {
+  router.push({ name: 'sessions', params: { project: group.slug } });
+}
+
+// ── Live tab: flat list of running sessions ─────────────────
+// Enrich live entries with title/project name from recentSessions
+const liveList = computed(() => {
+  const recentById = {};
+  for (const s of recentSessions.value) recentById[s.sessionId] = s;
+  return liveSessions.value.map((live) => {
+    const recent = recentById[live.sessionId];
+    return {
+      ...live,
+      title:
+        recent?.title ||
+        recent?.firstPrompt ||
+        live.sessionId?.slice(0, 8) ||
+        'Untitled',
+      projectName:
+        recent?.projectName || live.cwd?.split('/').pop() || live.projectSlug,
+    };
+  });
+});
+
+function openLiveSession(live) {
+  if (!live.projectSlug || !live.sessionId) return;
+  router.push({
+    name: 'chat',
+    params: { project: live.projectSlug, session: live.sessionId },
+  });
+}
+
+// ── Upgrade ─────────────────────────────────────────────────
 const isUpgrading = ref(false);
 
-// Reset state when reconnected
 watch(connected, (isConnected) => {
   if (isConnected) {
     isUpgrading.value = false;
+    fetchData();
   }
 });
 
-// Listen for upgrade errors
 onMessage((msg) => {
   if (msg.type === 'upgrade_error' || msg.type === 'restart_error') {
     isUpgrading.value = false;
@@ -86,13 +188,10 @@ onMessage((msg) => {
 
 function handleUpgrade() {
   if (isUpgrading.value) return;
-
   const version = updateAvailable.value?.latestVersion || 'latest';
-
   const confirmed = confirm(
     `Upgrade tofucode to v${version}?\n\nThis will:\n1. Download and install the update\n2. Restart the server\n3. Automatically reconnect\n\nThis may take 30-60 seconds.`,
   );
-
   if (confirmed) {
     isUpgrading.value = true;
     send({ type: 'upgrade', version });
@@ -106,366 +205,156 @@ function handleDismissUpdate(e) {
   }
 }
 
-// Fetch tasks + status options + assignees once on first tab open
-const tasksFetched = ref(false);
-
-function fetchTasksIfNeeded() {
-  if (resolvedTab.value === 'tasks' && !tasksFetched.value && connected.value) {
-    getTasks();
-    getTaskStatusOptions();
-    getTaskAssignees();
-    tasksFetched.value = true;
-  }
-}
-
-watch(() => props.activeTab, fetchTasksIfNeeded, { immediate: true });
-watch(connected, (isConnected) => {
-  // Reset on disconnect so reconnect triggers a fresh fetch (picks up new selfId, etc.)
-  if (!isConnected) tasksFetched.value = false;
-  fetchTasksIfNeeded();
-});
-
-// Initialize notes panel on first tab open
-const notesPanelRef = ref(null);
-
-watch(
-  () => props.activeTab,
-  (tab) => {
-    if (tab === 'notes') {
-      notesPanelRef.value?.initNotes();
-    }
-  },
-);
-
-function openTodayNote() {
-  notesPanelRef.value?.openTodayNote();
-}
-
-defineExpose({ openTodayNote });
-
-function handleSelectTask(pageId) {
-  router.push(`/tasks/${pageId}`);
-}
-
-function handleFilterChange(filter) {
-  setTasksFilter(filter);
-}
-
-function handleRefreshTasks() {
-  tasksFetched.value = true; // keep fetched flag — just re-fetch
-  getTasks();
-}
-
-// Current route info for highlighting
-const currentProject = computed(() => route.params.project);
-const currentSession = computed(() => route.params.session);
-
-// Fetch data when connected (use immediate for explicit user actions)
+// ── Data fetching ───────────────────────────────────────────
 function fetchData() {
   if (connected.value) {
-    getProjects();
     getRecentSessionsImmediate();
+    listRcSessions();
   }
 }
 
-// Fetch when connection becomes ready
-watch(connected, (isConnected) => {
-  if (isConnected) {
-    fetchData();
-  }
-});
-
-// Refresh data when sidebar opens
 watch(
   () => props.open,
   (isOpen) => {
-    if (isOpen) {
-      fetchData();
-    }
+    if (isOpen) fetchData();
   },
 );
 
-function startNewSession(projectSlug) {
-  router.push({
-    name: 'chat',
-    params: { project: projectSlug, session: 'new' },
-  });
-}
-
-function openSession(projectSlug, sessionId) {
-  router.push({
-    name: 'chat',
-    params: { project: projectSlug, session: sessionId },
-  });
-}
-
-function handleOverlayClick() {
-  emit('close');
-}
-
-onMounted(() => {
-  fetchData();
-});
+onMounted(fetchData);
 </script>
 
 <template>
   <aside class="sidebar" :class="{ open }">
+    <!-- Header: logo, version, upgrade, settings -->
     <div class="sidebar-header">
-      <router-link :to="{ name: 'projects' }" class="sidebar-title">
+      <router-link :to="{ name: 'home' }" class="sidebar-title">
         <img src="/icons/icon-192.png" alt="tofucode" class="sidebar-logo" />
       </router-link>
 
-      <!-- Version display -->
-      <span v-if="currentVersion" class="current-version">
-        v{{ currentVersion }}
-      </span>
+      <span v-if="currentVersion" class="current-version">v{{ currentVersion }}</span>
 
-      <!-- Upgrade button (shown when update available) -->
       <div v-if="updateAvailable" class="upgrade-btn-wrapper">
         <button
           class="upgrade-btn"
-          @click="handleUpgrade"
           :disabled="isUpgrading"
           :title="`Upgrade to v${updateAvailable.latestVersion}`"
+          @click="handleUpgrade"
         >
           <svg v-if="!isUpgrading" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 19V5M5 12l7-7 7 7"/>
           </svg>
-          <svg v-else width="12" height="12" viewBox="0 0 24 24" class="spin">
+          <svg v-else class="spin" width="12" height="12" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
           </svg>
           <span>v{{ updateAvailable.latestVersion }}</span>
         </button>
-        <button class="dismiss-btn" @click="handleDismissUpdate" title="Dismiss">×</button>
+        <button class="dismiss-btn" title="Dismiss" @click="handleDismissUpdate">×</button>
       </div>
 
-      <!-- Settings button -->
-      <button
-        class="sidebar-icon-btn"
-        @click="$emit('open-settings')"
-        title="Settings (Ctrl+,)"
-      >
+      <button class="sidebar-icon-btn" title="Settings (Ctrl+,)" @click="$emit('open-settings')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
           <circle cx="12" cy="12" r="3"/>
         </svg>
       </button>
-
     </div>
-    <div class="sidebar-content" :class="{ 'sidebar-content-tasks': resolvedTab === 'tasks' && notionEnabled, 'sidebar-content-notes': resolvedTab === 'notes' }">
-      <!-- Recent Sessions Tab -->
-      <!-- Skeleton while sessions are loading -->
-      <ul v-if="resolvedTab === 'sessions' && !sessionsReady" class="sidebar-list">
-        <li v-for="i in 4" :key="i" class="sidebar-item sidebar-skeleton-item">
-          <div class="sidebar-link">
-            <div class="skeleton-icon"></div>
-            <div class="skeleton-text">
-              <div class="skeleton-line skeleton-title"></div>
-              <div class="skeleton-line skeleton-meta"></div>
-            </div>
-          </div>
-        </li>
-      </ul>
-      <!-- Actual sessions list -->
-      <ul v-else-if="resolvedTab === 'sessions'" class="sidebar-list">
-        <li
-          v-for="session in recentSessions"
-          :key="session.sessionId"
-          class="sidebar-item"
-          :class="{ active: currentSession === session.sessionId }"
-        >
-          <a
-            :href="`/project/${session.projectSlug}/session/${session.sessionId}`"
-            class="sidebar-link"
-            @click.prevent="openSession(session.projectSlug, session.sessionId)"
-          >
-            <div class="item-icon" :class="{ 'has-status': sessionStatuses.get(session.sessionId) }">
-              <!-- Show status indicator if session has status -->
-              <template v-if="sessionStatuses.get(session.sessionId)">
-                <!-- Running: animated spinner -->
-                <svg
-                  v-if="sessionStatuses.get(session.sessionId).status === 'running'"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  class="status-spinner"
-                  :class="sessionStatuses.get(session.sessionId).status"
-                >
-                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
-                </svg>
-                <!-- Completed: checkmark -->
-                <svg
-                  v-else-if="sessionStatuses.get(session.sessionId).status === 'completed'"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  :class="sessionStatuses.get(session.sessionId).status"
-                >
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-                <!-- Error: X -->
-                <svg
-                  v-else-if="sessionStatuses.get(session.sessionId).status === 'error'"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  :class="sessionStatuses.get(session.sessionId).status"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </template>
-              <!-- Default session icon when no status -->
-              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-            </div>
-            <div class="item-content">
-              <p class="item-title truncate">{{ session.title || session.firstPrompt }}</p>
-              <p class="item-meta">
-                <router-link
-                  :to="{ name: 'sessions', params: { project: session.projectSlug } }"
-                  class="item-project"
-                  @click.stop
-                >
-                  {{ session.projectName }}
-                </router-link>
-                <span class="separator">·</span>
-                <span>{{ formatRelativeTime(session.modified) }}</span>
-              </p>
-            </div>
-            <!-- Terminal indicator badge -->
-            <div v-if="terminalCounts.get(session.projectSlug)" class="terminal-badge">
-              {{ terminalCounts.get(session.projectSlug) }}
-            </div>
-          </a>
-        </li>
-        <li v-if="recentSessions.length === 0" class="sidebar-empty">
-          No recent sessions
+
+    <!-- Tabs: recent (grouped) | live (running) -->
+    <div class="sidebar-tabs">
+      <button
+        class="sidebar-tab"
+        :class="{ active: activeTab === 'recent' }"
+        @click="setTab('recent')"
+      >
+        Recent
+      </button>
+      <button
+        class="sidebar-tab"
+        :class="{ active: activeTab === 'live' }"
+        @click="setTab('live')"
+      >
+        Live
+        <span v-if="liveList.length" class="tab-count">{{ liveList.length }}</span>
+      </button>
+    </div>
+
+    <!-- Recent tab: unified project/session list -->
+    <div v-if="activeTab === 'recent'" class="sidebar-content">
+      <!-- Skeleton while loading -->
+      <ul v-if="!sessionsReady" class="group-list">
+        <li v-for="i in 4" :key="i" class="skeleton-row">
+          <div class="skeleton-line skeleton-title"></div>
+          <div class="skeleton-line skeleton-meta"></div>
         </li>
       </ul>
 
-      <!-- Tasks Tab -->
-      <template v-else-if="resolvedTab === 'tasks'">
-        <div v-if="!notionEnabled" class="sidebar-list">
-          <div class="sidebar-empty">
-            Notion is not enabled. Configure it in
-            <button class="sidebar-empty-link" @click="$emit('open-settings', 'notion')">Settings → Notion</button>
-          </div>
-        </div>
-        <TasksPanel
-          v-else
-          :tasks="tasks"
-          :tasks-ready="tasksReady"
-          :tasks-error="tasksError"
-          :tasks-next-cursor="tasksNextCursor"
-          :tasks-filter="tasksFilter"
-          :task-status-options="taskStatusOptions"
-          :task-assignees="taskAssignees"
-          :task-self-id="taskSelfId"
-          @refresh="handleRefreshTasks"
-          @load-more="loadMoreTasks"
-          @select-task="handleSelectTask"
-          @filter-change="handleFilterChange"
-          @open-settings="$emit('open-settings', 'notion')"
+      <ul v-else-if="groups.length" class="group-list">
+        <SidebarProjectGroup
+          v-for="group in groups"
+          :key="group.slug"
+          :group="group"
+          :expanded="expanded.has(group.slug)"
+          :live-by-session-id="liveBySessionId"
+          :current-session="currentSession"
+          :starting="startingSlug === group.slug"
+          @toggle="toggleGroup(group.slug)"
+          @new-session="startNewSession(group)"
+          @open-session="(session) => openSession(group, session)"
+          @view-all="viewAll(group)"
         />
-      </template>
-
-      <!-- Notes Tab -->
-      <NotesPanel
-        v-else-if="resolvedTab === 'notes'"
-        ref="notesPanelRef"
-        @open-settings="(tab) => $emit('open-settings', tab)"
-      />
-
-      <!-- Projects Tab -->
-      <ul v-else-if="resolvedTab === 'projects'" class="sidebar-list">
-        <li
-          v-for="project in sortedProjects"
-          :key="project.slug"
-          class="sidebar-item project-item"
-          :class="{ active: currentProject === project.slug }"
-        >
-          <router-link
-            :to="{ name: 'sessions', params: { project: project.slug } }"
-            class="sidebar-link"
-          >
-            <div class="item-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              </svg>
-            </div>
-            <div class="item-content">
-              <p class="item-title truncate">{{ project.name }}</p>
-              <p class="item-meta">
-                <span>{{ project.sessionCount }} sessions</span>
-                <span class="separator">·</span>
-                <span>{{ formatRelativeTime(project.lastModified) }}</span>
-              </p>
-            </div>
-          </router-link>
-          <button
-            class="quick-new-btn"
-            @click.stop="startNewSession(project.slug)"
-            title="New session"
-          >
-            +
-          </button>
-        </li>
-        <li v-if="projects.length === 0" class="sidebar-empty">
-          No projects yet
-        </li>
       </ul>
+
+      <div v-else class="sidebar-empty">
+        <p>No sessions yet</p>
+        <p class="hint">Browse to a folder and start one</p>
+      </div>
     </div>
 
-    <!-- Projects toolbar (pinned, only in projects tab) -->
-    <div v-if="resolvedTab === 'projects'" class="sidebar-project-toolbar">
-      <!-- New Project -->
-      <button class="project-toolbar-btn" title="New Project" @click="$emit('new-project')">
+    <!-- Live tab: flat list of running sessions -->
+    <div v-else class="sidebar-content">
+      <ul v-if="liveList.length" class="group-list">
+        <li
+          v-for="live in liveList"
+          :key="live.sessionId"
+          class="live-row"
+          :class="{ active: currentSession === live.sessionId }"
+          @click="openLiveSession(live)"
+        >
+          <div class="live-main">
+            <span class="live-title truncate">{{ live.title }}</span>
+            <span class="live-project truncate">{{ live.projectName }}</span>
+          </div>
+          <RcClaudeLink :live="live" />
+          <RcBadge
+            :entrypoint="live.entrypoint"
+            :status="live.status"
+            :rc-active="live.rcActive"
+          />
+        </li>
+      </ul>
+      <div v-else class="sidebar-empty">
+        <p>No live sessions</p>
+        <p class="hint">Start one with ＋ on a project</p>
+      </div>
+    </div>
+
+    <!-- Footer: new project -->
+    <div class="sidebar-footer">
+      <button class="new-project-btn" @click="newProject?.open()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           <line x1="12" y1="11" x2="12" y2="17"/>
           <line x1="9" y1="14" x2="15" y2="14"/>
         </svg>
-        New Project
-      </button>
-      <div class="project-toolbar-divider"></div>
-      <!-- Sort A-Z toggle -->
-      <button
-        class="project-toolbar-icon-btn"
-        :class="{ active: sortAZ }"
-        :title="sortAZ ? 'Sorted A-Z (click for recent first)' : 'Sort A-Z'"
-        @click="sortAZ = !sortAZ"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 6h18M7 12h10M11 18h2"/>
-        </svg>
-      </button>
-      <!-- Clone -->
-      <button class="project-toolbar-icon-btn" title="Clone Repository" @click="openCloneDialog()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="18" r="3"/>
-          <circle cx="6" cy="6" r="3"/>
-          <circle cx="18" cy="6" r="3"/>
-          <path d="M6 9v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V9"/>
-          <line x1="12" y1="15" x2="12" y2="12"/>
-        </svg>
+        New project
       </button>
     </div>
   </aside>
 
-  <!-- Overlay for mobile -->
-  <div
-    v-if="open"
-    class="sidebar-overlay"
-    @click="handleOverlayClick"
-  ></div>
+  <!-- Overlay for tablet/mobile — teleported so it isn't a grid child -->
+  <Teleport to="body">
+    <div v-if="open" class="sidebar-overlay" @click="$emit('close')"></div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -497,92 +386,69 @@ onMounted(() => {
 .sidebar-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-  text-decoration: none;
-  transition: color 0.15s;
-  line-height: 36px;
-  margin-right: auto;
-}
-
-.sidebar-title:hover {
-  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .sidebar-logo {
-  flex-shrink: 0;
   width: 24px;
   height: 24px;
   border-radius: var(--radius-sm);
 }
 
 .current-version {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 400;
+  flex: 1;
+  font-size: 10px;
   font-family: var(--font-mono);
+  color: var(--text-muted);
 }
 
 .upgrade-btn-wrapper {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
-.upgrade-btn-wrapper .upgrade-btn {
+.upgrade-btn {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  background: rgba(217, 119, 6, 0.1);
-  border: 1px solid rgba(217, 119, 6, 0.3);
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
   border-radius: var(--radius-sm);
-  color: #d97706;
+  color: var(--success-color);
   cursor: pointer;
   transition: all 0.15s;
 }
 
-.upgrade-btn-wrapper .upgrade-btn:hover:not(:disabled) {
-  background: rgba(217, 119, 6, 0.15);
-  border-color: rgba(217, 119, 6, 0.4);
+.upgrade-btn:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
 }
 
-.upgrade-btn-wrapper .upgrade-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.upgrade-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
-.upgrade-btn-wrapper .upgrade-btn .spin {
-  animation: spin 1s linear infinite;
-}
-
-.upgrade-btn-wrapper .dismiss-btn {
-  position: absolute;
-  top: -6px;
-  right: -6px;
+.dismiss-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   padding: 0;
-  background: var(--bg-secondary);
-  border: 1px solid rgba(217, 119, 6, 0.3);
-  border-radius: 50%;
-  font-size: 12px;
-  line-height: 1;
-  color: #d97706;
-  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
   transition: all 0.15s;
 }
 
-.upgrade-btn-wrapper .dismiss-btn:hover {
-  background: rgba(217, 119, 6, 0.15);
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.4);
+.dismiss-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .sidebar-icon-btn {
@@ -592,371 +458,206 @@ onMounted(() => {
   width: 28px;
   height: 28px;
   padding: 0;
-  background: transparent;
-  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
+  color: var(--text-muted);
+  flex-shrink: 0;
   transition: all 0.15s;
-  margin-right: 4px;
 }
 
 .sidebar-icon-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
-.sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-  padding-bottom: 0;
-  min-height: 0;
-}
-
-/* When the tasks tab is active and TasksPanel is rendering, let the panel
-   manage its own scroll/flex layout. We make sidebar-content a pass-through
-   flex container so TasksPanel gets the full flex: 1 height. */
-.sidebar-content-tasks,
-.sidebar-content-notes {
-  overflow: hidden;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-list {
-  list-style: none;
-}
-
-.sidebar-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  border-radius: var(--radius-md);
-  transition: background 0.15s;
-}
-
-.sidebar-item:hover {
   background: var(--bg-hover);
-}
-
-.sidebar-item.active {
-  background: var(--bg-tertiary);
-}
-
-.sidebar-link {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  color: inherit;
-  text-decoration: none;
-  flex: 1;
-  min-width: 0;
-  position: relative;
-}
-
-.terminal-badge {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: #f59e0b;
-  color: #000;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 10px;
-  min-width: 18px;
-  text-align: center;
-  line-height: 1.4;
-}
-
-.item-icon {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-}
-
-.sidebar-item.active .item-icon {
-  background: var(--bg-hover);
-}
-
-/* Status colors in icon */
-.item-icon svg.running {
-  color: #3b82f6;
-}
-
-.item-icon svg.completed {
-  color: var(--success-color);
-}
-
-.item-icon svg.error {
-  color: var(--error-color);
-}
-
-.item-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.item-title {
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 2px;
-}
-
-.item-meta {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.item-project {
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  text-decoration: none;
-  transition: color 0.15s;
-}
-
-.item-project:hover {
   color: var(--text-primary);
-  text-decoration: underline;
 }
 
-.separator {
-  margin: 0 4px;
-}
-
-.project-item {
+/* Tabs */
+.sidebar-tabs {
   display: flex;
-  align-items: center;
-}
-
-.project-item .sidebar-link {
-  flex: 1;
-  min-width: 0;
-}
-
-.project-item .quick-new-btn {
-  opacity: 0;
-  padding: 2px 8px;
-  margin-right: 10px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
-.project-item:hover .quick-new-btn {
-  opacity: 1;
-}
-
-.quick-new-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.sidebar-empty {
-  padding: 24px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.sidebar-empty-link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--text-secondary);
-  font-size: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.sidebar-empty-link:hover {
-  color: var(--text-primary);
-}
-
-.sidebar-project-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  border-top: 1px solid var(--border-color);
-}
-
-.project-toolbar-btn {
+.sidebar-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  white-space: nowrap;
-  padding: 5px 8px;
+  padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
   background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: color 0.15s, border-color 0.15s;
 }
 
-.project-toolbar-btn:hover {
-  background: var(--bg-tertiary);
+.sidebar-tab:hover {
+  color: var(--text-secondary);
+}
+
+.sidebar-tab.active {
   color: var(--text-primary);
-  border-color: var(--text-muted);
+  border-bottom-color: var(--accent-color);
 }
 
-.project-toolbar-divider {
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success-color);
+}
+
+.sidebar-content {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
 }
 
-.project-toolbar-icon-btn {
+/* Live tab rows */
+.live-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  list-style: none;
+  transition: background 0.1s;
+}
+
+.live-row:hover {
+  background: var(--bg-hover);
+}
+
+.live-row.active {
+  background: var(--bg-tertiary);
+}
+
+.live-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.live-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.live-project {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.sidebar-empty .hint {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.sidebar-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.new-project-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
   background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: all 0.15s;
 }
 
-.project-toolbar-icon-btn:hover {
+.new-project-btn:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border-color: var(--text-muted);
 }
 
-.project-toolbar-icon-btn.active {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
-/* Animated spinner for running status */
-.status-spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Skeleton loading for sessions */
-@keyframes shimmer {
-  0% { opacity: 0.4; }
-  50% { opacity: 0.8; }
-  100% { opacity: 0.4; }
-}
-
-.sidebar-skeleton-item .sidebar-link {
-  pointer-events: none;
-}
-
-.skeleton-icon {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  animation: shimmer 1.4s ease-in-out infinite;
-}
-
-.skeleton-text {
-  flex: 1;
-  min-width: 0;
+/* Skeleton loading */
+.skeleton-row {
+  list-style: none;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .skeleton-line {
-  border-radius: 4px;
-  background: var(--bg-tertiary);
-  animation: shimmer 1.4s ease-in-out infinite;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
 }
 
 .skeleton-title {
-  height: 13px;
-  width: 75%;
+  width: 70%;
 }
 
 .skeleton-meta {
-  height: 11px;
-  width: 50%;
-  animation-delay: 0.2s;
+  width: 45%;
 }
 
-/* Overlay (mobile only, controlled by media query) */
-.sidebar-overlay {
-  display: none;
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
-
-/* Tablet styles - sidebar as overlay at desktop width */
-@media (min-width: 641px) and (max-width: 1024px) {
+/* ≤1024px: sidebar as fixed overlay */
+@media (max-width: 1024px) {
   .sidebar.open {
     position: fixed;
     left: 0;
     top: 0;
-    bottom: var(--bottom-bar-height);
+    bottom: 0;
     height: auto;
     z-index: 200;
     width: var(--sidebar-width);
   }
-
-  .sidebar-overlay {
-    display: block;
-    position: fixed;
-    inset: 0;
-    bottom: var(--bottom-bar-height);
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 199;
-  }
 }
 
-/* Mobile styles - sidebar as overlay full width */
+/* Mobile: full width overlay */
 @media (max-width: 640px) {
   .sidebar.open {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: var(--bottom-bar-height);
-    height: auto;
-    z-index: 200;
     width: 100vw;
-  }
-
-  .sidebar-overlay {
-    display: block;
-    position: fixed;
-    inset: 0;
-    bottom: var(--bottom-bar-height);
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 199;
   }
 }
 </style>

@@ -1,20 +1,7 @@
 <script setup>
 import * as Diff from 'diff';
 import { computed, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 import { formatToolCompact } from '../utils/format.js';
-import DiffViewer from './DiffViewer.vue';
-
-const route = useRoute();
-const router = useRouter();
-
-function openInFiles(path) {
-  router.push({
-    name: 'chat',
-    params: route.params,
-    query: { ...route.query, mode: 'files', file: path },
-  });
-}
 
 const props = defineProps({
   items: Array,
@@ -184,24 +171,11 @@ function getDiffStats(item) {
             <code v-if="formatTool(item).type === 'command'" class="tool-command">{{ truncate(formatTool(item).primary, 200) }}</code>
             <div v-else-if="formatTool(item).type === 'path'" class="tool-path-row">
               <code class="tool-path">{{ formatTool(item).primary }}</code>
-              <button class="tool-file-link" @click.stop="openInFiles(formatTool(item).primary)" title="Open in Files tab">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
-                </svg>
-              </button>
             </div>
             <code v-else-if="formatTool(item).type === 'pattern'" class="tool-pattern">{{ formatTool(item).primary }}</code>
             <span v-else class="tool-text">{{ formatTool(item).primary }}</span>
           </div>
 
-          <!-- Show diff for Edit tool (collapsible) -->
-          <div v-if="item.tool === 'Edit' && item.input?.old_string && item.input?.new_string && isDiffExpanded(index)" class="tool-diff">
-            <DiffViewer
-              :old-content="item.input.old_string"
-              :new-content="item.input.new_string"
-              :hide-header="true"
-            />
-          </div>
 
           <!-- Show result inline (collapsible, collapsed by default) -->
           <div v-if="hasResult(index) && isResultExpanded(index)" class="tool-result-inline">

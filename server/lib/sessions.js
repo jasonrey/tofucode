@@ -12,7 +12,6 @@ import {
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { getSessionsDir } from '../config.js';
-import { loadTitles } from './session-titles.js';
 
 /**
  * SECURITY: Validate sessionId format to prevent path traversal
@@ -41,9 +40,6 @@ export async function getSessionsList(projectSlug) {
     const sessionsDir = getSessionsDir(projectSlug);
     const indexPath = join(sessionsDir, 'sessions-index.json');
 
-    // Load custom titles from .session-titles.json (SDK-safe storage)
-    const titles = loadTitles(projectSlug);
-
     // Start with indexed sessions
     const sessionsMap = new Map();
     if (existsSync(indexPath)) {
@@ -52,13 +48,13 @@ export async function getSessionsList(projectSlug) {
         const jsonlPath = join(sessionsDir, `${entry.sessionId}.jsonl`);
         let modified = entry.modified;
         let messageCount = entry.messageCount || 0;
+        let title = null;
 
         if (existsSync(jsonlPath)) {
           try {
             const stats = statSync(jsonlPath);
             modified = stats.mtime.toISOString();
 
-            // Recount displayable messages from JSONL (SDK includes system messages in index)
             messageCount = 0;
             await new Promise((resolve, reject) => {
               const rl = createInterface({
@@ -70,8 +66,9 @@ export async function getSessionsList(projectSlug) {
                 if (line.trim()) {
                   try {
                     const msgEntry = JSON.parse(line);
-                    // Only count displayable message types
-                    if (
+                    if (msgEntry.type === 'ai-title' && msgEntry.aiTitle) {
+                      title = msgEntry.aiTitle;
+                    } else if (
                       msgEntry.type === 'user' ||
                       msgEntry.type === 'human' ||
                       msgEntry.type === 'assistant' ||
@@ -100,8 +97,7 @@ export async function getSessionsList(projectSlug) {
           messageCount,
           created: entry.created,
           modified,
-          // Use .session-titles.json (SDK overwrites sessions-index.json customTitle)
-          title: titles[entry.sessionId] || null,
+          title,
         });
       }
     }
@@ -117,12 +113,11 @@ export async function getSessionsList(projectSlug) {
             const jsonlPath = join(sessionsDir, file);
             try {
               const stats = statSync(jsonlPath);
-              // Read first line via streaming (don't load entire file)
               let firstPrompt = 'New session';
+              let title = null;
               let messageCount = 0;
 
               try {
-                // Use streaming to count displayable messages and get first user prompt
                 await new Promise((resolve, reject) => {
                   const rl = createInterface({
                     input: createReadStream(jsonlPath),
@@ -134,8 +129,9 @@ export async function getSessionsList(projectSlug) {
                     if (line.trim()) {
                       try {
                         const entry = JSON.parse(line);
-                        // Only count displayable message types (exclude system, summary, etc.)
-                        if (
+                        if (entry.type === 'ai-title' && entry.aiTitle) {
+                          title = entry.aiTitle;
+                        } else if (
                           entry.type === 'user' ||
                           entry.type === 'human' ||
                           entry.type === 'assistant' ||
@@ -143,7 +139,6 @@ export async function getSessionsList(projectSlug) {
                         ) {
                           messageCount++;
 
-                          // Get first user prompt for display
                           if (
                             !firstUserPromptFound &&
                             (entry.type === 'user' || entry.type === 'human') &&
@@ -183,8 +178,7 @@ export async function getSessionsList(projectSlug) {
                 messageCount,
                 created: stats.birthtime.toISOString(),
                 modified: stats.mtime.toISOString(),
-                // Unindexed sessions don't have customTitle
-                title: null,
+                title,
               });
             } catch (err) {
               console.error(`Failed to stat ${file}:`, err.message);

@@ -104,7 +104,7 @@ tofucode - Web UI for Claude Code
 Usage:
   tofucode [start] [options]   Start server (default command)
   tofucode stop                Stop running daemon
-  tofucode restart             Restart running daemon
+  tofucode restart [options]   Start or restart daemon (idempotent)
   tofucode status              Check daemon status
 
 Options (for start command):
@@ -126,7 +126,9 @@ Options (for start command):
 Lifecycle Commands:
   start                      Start server (default)
   stop                       Stop running daemon
-  restart                    Restart running daemon
+  restart                    Start or restart daemon (idempotent) — stops the
+                             daemon if running, then starts with the given
+                             options/config; just starts if nothing is running
   status                     Check daemon status
 
   Legacy flags (deprecated):
@@ -169,7 +171,8 @@ Examples:
   tofucode start --config prod.json -d   # Use config file + daemon mode
   tofucode start --root /path/to/project # Restrict to specific directory
   tofucode stop                      # Stop running daemon
-  tofucode restart                   # Restart running daemon
+  tofucode restart                   # (Re)start daemon — starts if not running
+  tofucode restart --config prod.json  # (Re)start with config
   tofucode status                    # Check daemon status
 
 Security:
@@ -458,52 +461,70 @@ async function loadConfig(options) {
   }
 }
 
+/**
+ * Stop the running daemon if there is one.
+ * Never exits the process — returns a status so callers decide:
+ *   'stopped'     — daemon was running and is now stopped
+ *   'not_running' — no PID file
+ *   'stale'       — PID file existed but process was gone (file cleaned up)
+ */
+async function stopDaemon(pidFile) {
+  if (!existsSync(pidFile)) {
+    return 'not_running';
+  }
+
+  const pid = parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
+
+  // Check if process exists
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    unlinkSync(pidFile);
+    return 'stale';
+  }
+
+  // Send SIGTERM
+  console.log(`Stopping tofucode (PID: ${pid})...`);
+  process.kill(pid, 'SIGTERM');
+
+  // Wait for process to exit (max 10 seconds)
+  let attempts = 0;
+  while (attempts < 20) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+      process.kill(pid, 0);
+      attempts++;
+    } catch (err) {
+      // Process no longer exists
+      console.log('tofucode stopped successfully');
+      unlinkSync(pidFile);
+      return 'stopped';
+    }
+  }
+
+  // Force kill if still running
+  console.log('Process did not stop gracefully, forcing...');
+  process.kill(pid, 'SIGKILL');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  unlinkSync(pidFile);
+  console.log('tofucode stopped (forced)');
+  return 'stopped';
+}
+
 async function handleStop() {
   const pidFile = getPidFile();
 
-  if (!existsSync(pidFile)) {
-    console.error('Error: PID file not found. Is tofucode running as daemon?');
-    console.error(`Expected: ${pidFile}`);
-    process.exit(1);
-  }
-
   try {
-    const pid = parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
-
-    // Check if process exists
-    try {
-      process.kill(pid, 0);
-    } catch (err) {
-      console.error(`Error: Process ${pid} not found (stale PID file)`);
-      unlinkSync(pidFile);
+    const result = await stopDaemon(pidFile);
+    if (result === 'not_running') {
+      console.error('Error: PID file not found. Is tofucode running as daemon?');
+      console.error(`Expected: ${pidFile}`);
       process.exit(1);
     }
-
-    // Send SIGTERM
-    console.log(`Stopping tofucode (PID: ${pid})...`);
-    process.kill(pid, 'SIGTERM');
-
-    // Wait for process to exit (max 10 seconds)
-    let attempts = 0;
-    while (attempts < 20) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      try {
-        process.kill(pid, 0);
-        attempts++;
-      } catch (err) {
-        // Process no longer exists
-        console.log('tofucode stopped successfully');
-        unlinkSync(pidFile);
-        return;
-      }
+    if (result === 'stale') {
+      console.error('Error: Process not found (stale PID file cleaned up)');
+      process.exit(1);
     }
-
-    // Force kill if still running
-    console.log('Process did not stop gracefully, forcing...');
-    process.kill(pid, 'SIGKILL');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    unlinkSync(pidFile);
-    console.log('tofucode stopped (forced)');
   } catch (err) {
     console.error(`Error: Failed to stop tofucode: ${err.message}`);
     process.exit(1);
@@ -539,12 +560,15 @@ async function handleRestart() {
   }
 
   try {
-    if (existsSync(pidFile)) {
-      console.log('Stopping existing daemon...');
-      await handleStop();
-      console.log('');
+    // Idempotent: stop the daemon if running, then start fresh either way.
+    // A missing PID file or a stale one is not an error — just start.
+    const stopResult = await stopDaemon(pidFile);
+    if (stopResult === 'not_running') {
+      console.log('No running daemon found — starting fresh');
+    } else if (stopResult === 'stale') {
+      console.log('Cleaned up stale PID file — starting fresh');
     } else {
-      console.log('No running daemon found');
+      console.log('');
     }
 
     console.log('Starting tofucode...');
@@ -562,24 +586,29 @@ async function handleRestart() {
       stdio: 'inherit',
     });
 
-    // Wait for new CLI to exit (it will exit after spawning daemon)
-    child.on('exit', (code) => {
-      // Remove restart lock
-      try {
-        if (existsSync(restartLockFile)) {
-          unlinkSync(restartLockFile);
-        }
-      } catch (err) {
-        console.error(`Warning: Failed to remove restart lock: ${err.message}`);
-      }
-
-      if (code === 0) {
-        console.log('Restart completed successfully');
-      } else {
-        console.error(`Restart failed with exit code ${code}`);
-      }
-      process.exit(code || 0);
+    // Wait for new CLI to exit (it exits after spawning the daemon).
+    // Must be awaited — the caller process.exit()s as soon as we return,
+    // and the restart lock has to be removed before that.
+    const code = await new Promise((resolveExit) => {
+      child.on('exit', resolveExit);
+      child.on('error', () => resolveExit(1));
     });
+
+    // Remove restart lock
+    try {
+      if (existsSync(restartLockFile)) {
+        unlinkSync(restartLockFile);
+      }
+    } catch (err) {
+      console.error(`Warning: Failed to remove restart lock: ${err.message}`);
+    }
+
+    if (code === 0) {
+      console.log('Restart completed successfully');
+    } else {
+      console.error(`Restart failed with exit code ${code}`);
+    }
+    process.exit(code || 0);
   } catch (err) {
     // Remove restart lock on error
     try {
