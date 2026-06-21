@@ -1,7 +1,7 @@
 <script setup>
 import { computed, inject, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useWebSocket } from '../composables/useWebSocket';
+import { useApi } from '../composables/useApi';
 import RcBadge from './RcBadge.vue';
 import RcClaudeLink from './RcClaudeLink.vue';
 import SidebarProjectGroup from './SidebarProjectGroup.vue';
@@ -18,7 +18,6 @@ const emit = defineEmits(['close', 'open-settings']);
 const route = useRoute();
 const router = useRouter();
 const {
-  connected,
   recentSessions,
   sessionsReady,
   currentVersion,
@@ -29,9 +28,7 @@ const {
   listRcSessions,
   startNewRcSession,
   dismissUpdate,
-  send,
-  onMessage,
-} = useWebSocket();
+} = useApi();
 
 const newProject = inject('newProject', null);
 
@@ -170,34 +167,6 @@ function openLiveSession(live) {
 }
 
 // ── Upgrade ─────────────────────────────────────────────────
-const isUpgrading = ref(false);
-
-watch(connected, (isConnected) => {
-  if (isConnected) {
-    isUpgrading.value = false;
-    fetchData();
-  }
-});
-
-onMessage((msg) => {
-  if (msg.type === 'upgrade_error' || msg.type === 'restart_error') {
-    isUpgrading.value = false;
-    alert(`Upgrade failed: ${msg.message}`);
-  }
-});
-
-function handleUpgrade() {
-  if (isUpgrading.value) return;
-  const version = updateAvailable.value?.latestVersion || 'latest';
-  const confirmed = confirm(
-    `Upgrade tofucode to v${version}?\n\nThis will:\n1. Download and install the update\n2. Restart the server\n3. Automatically reconnect\n\nThis may take 30-60 seconds.`,
-  );
-  if (confirmed) {
-    isUpgrading.value = true;
-    send({ type: 'upgrade', version });
-  }
-}
-
 function handleDismissUpdate(e) {
   e.stopPropagation();
   if (updateAvailable.value) {
@@ -207,10 +176,8 @@ function handleDismissUpdate(e) {
 
 // ── Data fetching ───────────────────────────────────────────
 function fetchData() {
-  if (connected.value) {
-    getRecentSessionsImmediate();
-    listRcSessions();
-  }
+  getRecentSessionsImmediate();
+  listRcSessions();
 }
 
 watch(
@@ -234,20 +201,18 @@ onMounted(fetchData);
       <span v-if="currentVersion" class="current-version">v{{ currentVersion }}</span>
 
       <div v-if="updateAvailable" class="upgrade-btn-wrapper">
-        <button
+        <a
           class="upgrade-btn"
-          :disabled="isUpgrading"
-          :title="`Upgrade to v${updateAvailable.latestVersion}`"
-          @click="handleUpgrade"
+          :href="updateAvailable.updateUrl"
+          target="_blank"
+          rel="noopener"
+          :title="`v${updateAvailable.latestVersion} available`"
         >
-          <svg v-if="!isUpgrading" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 19V5M5 12l7-7 7 7"/>
           </svg>
-          <svg v-else class="spin" width="12" height="12" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
-          </svg>
           <span>v{{ updateAvailable.latestVersion }}</span>
-        </button>
+        </a>
         <button class="dismiss-btn" title="Dismiss" @click="handleDismissUpdate">×</button>
       </div>
 

@@ -1,14 +1,13 @@
 <script setup>
-import { onMounted, watch } from 'vue';
+import { onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import FolderBrowser from '../components/FolderBrowser.vue';
-import { useWebSocket } from '../composables/useWebSocket';
+import { useApi } from '../composables/useApi';
 import { pathToSlug } from '../utils/slug.js';
 
 const router = useRouter();
-const { connected, connect, browseFolder, currentFolder, rootPath } =
-  useWebSocket();
+const { browseFolder, currentFolder, rootPath } = useApi();
 
 function openFolder(path) {
   router.push({ name: 'sessions', params: { project: pathToSlug(path) } });
@@ -19,20 +18,9 @@ function onCreated(projectSlug) {
 }
 
 onMounted(() => {
-  connect();
   document.title = 'tofucode';
+  browseFolder(currentFolder.value || null);
 });
-
-// Browse home (or last folder) once connected
-watch(
-  connected,
-  (isConnected) => {
-    if (isConnected) {
-      browseFolder(currentFolder.value || null);
-    }
-  },
-  { immediate: true },
-);
 </script>
 
 <template>

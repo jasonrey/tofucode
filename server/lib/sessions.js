@@ -48,7 +48,8 @@ export async function getSessionsList(projectSlug) {
         const jsonlPath = join(sessionsDir, `${entry.sessionId}.jsonl`);
         let modified = entry.modified;
         let messageCount = entry.messageCount || 0;
-        let title = null;
+        let aiTitle = null;
+        let customTitle = null;
 
         if (existsSync(jsonlPath)) {
           try {
@@ -66,8 +67,16 @@ export async function getSessionsList(projectSlug) {
                 if (line.trim()) {
                   try {
                     const msgEntry = JSON.parse(line);
-                    if (msgEntry.type === 'ai-title' && msgEntry.aiTitle) {
-                      title = msgEntry.aiTitle;
+                    if (
+                      msgEntry.type === 'custom-title' &&
+                      msgEntry.customTitle
+                    ) {
+                      customTitle = msgEntry.customTitle;
+                    } else if (
+                      msgEntry.type === 'ai-title' &&
+                      msgEntry.aiTitle
+                    ) {
+                      aiTitle = msgEntry.aiTitle;
                     } else if (
                       msgEntry.type === 'user' ||
                       msgEntry.type === 'human' ||
@@ -97,7 +106,7 @@ export async function getSessionsList(projectSlug) {
           messageCount,
           created: entry.created,
           modified,
-          title,
+          title: customTitle ?? aiTitle ?? null,
         });
       }
     }
@@ -114,7 +123,8 @@ export async function getSessionsList(projectSlug) {
             try {
               const stats = statSync(jsonlPath);
               let firstPrompt = 'New session';
-              let title = null;
+              let aiTitle = null;
+              let customTitle = null;
               let messageCount = 0;
 
               try {
@@ -129,8 +139,13 @@ export async function getSessionsList(projectSlug) {
                     if (line.trim()) {
                       try {
                         const entry = JSON.parse(line);
-                        if (entry.type === 'ai-title' && entry.aiTitle) {
-                          title = entry.aiTitle;
+                        if (
+                          entry.type === 'custom-title' &&
+                          entry.customTitle
+                        ) {
+                          customTitle = entry.customTitle;
+                        } else if (entry.type === 'ai-title' && entry.aiTitle) {
+                          aiTitle = entry.aiTitle;
                         } else if (
                           entry.type === 'user' ||
                           entry.type === 'human' ||
@@ -178,7 +193,7 @@ export async function getSessionsList(projectSlug) {
                 messageCount,
                 created: stats.birthtime.toISOString(),
                 modified: stats.mtime.toISOString(),
-                title,
+                title: customTitle ?? aiTitle ?? null,
               });
             } catch (err) {
               console.error(`Failed to stat ${file}:`, err.message);

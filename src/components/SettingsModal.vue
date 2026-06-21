@@ -11,17 +11,13 @@ const props = defineProps({
     type: Object,
     default: () => ({ debugMode: false }),
   },
-  connected: {
-    type: Boolean,
-    default: true,
-  },
   initialTab: {
     type: String,
     default: 'general',
   },
 });
 
-const emit = defineEmits(['close', 'update', 'restart']);
+const emit = defineEmits(['close', 'update']);
 
 const activeTab = ref('general');
 
@@ -149,35 +145,7 @@ async function handleChangePassword() {
   }
 }
 
-// ── Restart / PWA ─────────────────────────────────────────────────────────────
-
-const isRestarting = ref(false);
-const showConnectionPill = ref(false);
-
-watch(
-  () => props.connected,
-  (isConnected) => {
-    if (isConnected && isRestarting.value) {
-      isRestarting.value = false;
-      showConnectionPill.value = true;
-      setTimeout(() => {
-        showConnectionPill.value = false;
-      }, 3000);
-    }
-  },
-);
-
-function handleRestart() {
-  if (isRestarting.value) return;
-  const confirmed = confirm(
-    'Restart the server?\n\nThis will briefly disconnect all clients. They will automatically reconnect.',
-  );
-  if (confirmed) {
-    isRestarting.value = true;
-    showConnectionPill.value = true;
-    emit('restart');
-  }
-}
+// ── PWA ────────────────────────────────────────────────────────────────────────
 
 const isUpdatingPWA = ref(false);
 
@@ -228,18 +196,6 @@ async function handleClearCacheAndUpdate() {
               </svg>
             </button>
             <span class="header-action-label">{{ isUpdatingPWA ? 'clearing...' : 'clear cache' }}</span>
-          </div>
-          <div class="header-action-wrap">
-            <button class="header-action-btn" @click="handleRestart" :disabled="isRestarting">
-              <svg v-if="!isRestarting" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/>
-                <line x1="12" y1="2" x2="12" y2="12"/>
-              </svg>
-              <svg v-else width="15" height="15" viewBox="0 0 24 24" class="spin">
-                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
-              </svg>
-            </button>
-            <span class="header-action-label">{{ isRestarting ? 'restarting...' : 'restart' }}</span>
           </div>
           <button class="close-btn" @click="closeModal" title="Close">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -312,38 +268,6 @@ async function handleClearCacheAndUpdate() {
                 <span>{{ isUpdatingPWA ? 'Clearing...' : 'Clear Cache & Update' }}</span>
               </button>
               <a href="/api/sw-reset" class="sw-reset-link">hard reset page</a>
-            </div>
-          </div>
-
-          <!-- Server Control -->
-          <div class="setting-item">
-            <div class="setting-header">
-              <span class="setting-title">Server Control</span>
-            </div>
-            <p class="setting-description">
-              Restart the server. All clients will be briefly disconnected and automatically reconnect.
-            </p>
-            <div class="action-row">
-              <button class="action-btn" @click="handleRestart" :disabled="isRestarting">
-                <svg v-if="!isRestarting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M23 4v6h-6"/>
-                  <path d="M1 20v-6h6"/>
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                </svg>
-                <svg v-else width="14" height="14" viewBox="0 0 24 24" class="spin">
-                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
-                </svg>
-                <span>{{ isRestarting ? 'Restarting...' : 'Restart Server' }}</span>
-              </button>
-              <transition name="fade">
-                <div v-if="showConnectionPill" class="connection-pill" :class="{ connected: !isRestarting && connected }">
-                  <div v-if="isRestarting" class="pill-spinner" />
-                  <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  <span>{{ isRestarting ? 'Connecting...' : 'Connected' }}</span>
-                </div>
-              </transition>
             </div>
           </div>
 
@@ -752,34 +676,6 @@ async function handleClearCacheAndUpdate() {
   color: var(--text-secondary);
 }
 
-.connection-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  border-radius: 12px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  transition: opacity 0.3s ease;
-}
-
-.connection-pill.connected {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.3);
-  color: rgb(34, 197, 94);
-}
-
-.pill-spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--border-color);
-  border-top-color: var(--text-secondary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
 
 .viewport-display {
   display: flex;

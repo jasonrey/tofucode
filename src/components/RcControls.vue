@@ -22,7 +22,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import { useWebSocket } from '../composables/useWebSocket';
+import { useApi } from '../composables/useApi';
 import RcBadge from './RcBadge.vue';
 
 const props = defineProps({
@@ -30,7 +30,7 @@ const props = defineProps({
   projectSlug: String,
 });
 
-const { liveBySessionId, startRcSession, stopRcSession } = useWebSocket();
+const { liveBySessionId, startRcSession, stopRcSession } = useApi();
 
 const pending = ref(false);
 const errorMsg = ref('');
@@ -57,8 +57,8 @@ async function start() {
     } else if (result.status === 'failed') {
       errorMsg.value = result.message || 'Failed to start';
     }
-  } catch {
-    errorMsg.value = 'Request timed out';
+  } catch (err) {
+    errorMsg.value = err.message || 'Request failed';
   } finally {
     pending.value = false;
   }
@@ -77,8 +77,8 @@ async function startNew() {
     if (result.status === 'failed') {
       errorMsg.value = result.message || 'Failed to start';
     }
-  } catch {
-    errorMsg.value = 'Request timed out';
+  } catch (err) {
+    errorMsg.value = err.message || 'Request failed';
   } finally {
     pending.value = false;
   }
@@ -89,8 +89,8 @@ async function stop() {
   errorMsg.value = '';
   try {
     await stopRcSession({ sessionId: props.sessionId });
-  } catch {
-    errorMsg.value = 'Request timed out';
+  } catch (err) {
+    errorMsg.value = err.message || 'Request failed';
   } finally {
     pending.value = false;
   }

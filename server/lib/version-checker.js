@@ -1,11 +1,10 @@
 /**
  * Version Checker
  *
- * Periodically checks npm registry for newer versions of tofucode
- * and broadcasts update notifications to all connected clients.
+ * Periodically checks npm registry for newer versions of tofucode.
+ * The latest version is exposed via getLatestVersion() and surfaced to
+ * clients through the GET /api/v2/info endpoint.
  */
-
-import { broadcast } from './ws.js';
 
 let currentVersion = null;
 let latestVersion = null;
@@ -51,12 +50,6 @@ async function checkForUpdates() {
     console.log(
       `[SIMULATED] Update available: v${currentVersion} -> v${latestVersion}`,
     );
-    broadcast({
-      type: 'update_available',
-      currentVersion,
-      latestVersion,
-      updateUrl: `https://www.npmjs.com/package/${PACKAGE_NAME}`,
-    });
     return;
   }
 
@@ -74,14 +67,6 @@ async function checkForUpdates() {
 
     if (latestVersion && isNewerVersion(latestVersion, currentVersion)) {
       console.log(`Update available: v${currentVersion} -> v${latestVersion}`);
-
-      // Broadcast to all connected clients
-      broadcast({
-        type: 'update_available',
-        currentVersion,
-        latestVersion,
-        updateUrl: `https://www.npmjs.com/package/${PACKAGE_NAME}`,
-      });
     } else {
       console.log(
         `No update available (current: v${currentVersion}, latest: v${latestVersion || 'unknown'})`,

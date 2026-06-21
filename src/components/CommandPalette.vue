@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { useWebSocket } from '../composables/useWebSocket';
+import { useApi } from '../composables/useApi';
 import { formatRelativeTime } from '../utils/format.js';
 
 const props = defineProps({
@@ -24,7 +24,7 @@ const {
   searchTruncated,
   searchSessions,
   clearSearch,
-} = useWebSocket();
+} = useApi();
 
 const searchQuery = ref('');
 const selectedIndex = ref(0);

@@ -28,6 +28,7 @@ export function readProcStart(pid) {
     // fields after comm are space-separated; starttime is field index 19
     // (0-based: state=0, ppid=1, ... starttime=19)
     const fields = afterComm.split(' ');
+    if (fields[0] === 'Z') return null; // zombie — treat as dead
     return fields[19] ?? null;
   } catch {
     return null;

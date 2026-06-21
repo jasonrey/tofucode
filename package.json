@@ -49,8 +49,7 @@
     "multer": "^2.0.2",
     "node-pty": "^1.1.0",
     "tiny-markdown-editor": "^0.2.18",
-    "vite-plugin-compression2": "^2.4.0",
-    "ws": "^8.19.0"
+    "vite-plugin-compression2": "^2.4.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",

@@ -1,7 +1,7 @@
 <script setup>
 import { onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { useWebSocket } from '../composables/useWebSocket';
+import { useApi } from '../composables/useApi';
 import { pathToSlug } from '../utils/slug.js';
 import FolderBrowser from './FolderBrowser.vue';
 
@@ -15,7 +15,7 @@ const props = defineProps({
 const emit = defineEmits(['close']);
 
 const router = useRouter();
-const { browseFolder, currentFolder } = useWebSocket();
+const { browseFolder, currentFolder } = useApi();
 
 // Pick an existing folder → navigate to its session list (no auto session start)
 function selectFolder(path) {

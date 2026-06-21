@@ -95,6 +95,30 @@ async function waitForRegistry(
   return null;
 }
 
+/**
+ * Like waitForRegistry, but if the first wait times out and the process is
+ * still alive (just slow to write its registry file), extends the wait by
+ * extendedMs rather than immediately declaring failure.
+ *
+ * This prevents false "failed" results when the VM is under load at startup.
+ */
+async function waitForRegistryWithExtension(
+  pid,
+  { timeoutMs = 8000, extendedMs = 10000, intervalMs = 250 } = {},
+) {
+  const entry = await waitForRegistry(pid, { timeoutMs, intervalMs });
+  if (entry) return entry;
+
+  // If the PTY process is still alive it's just slow — give it more time.
+  if (activePtys.has(pid)) {
+    logger.log(
+      `[rc-launcher] Registry not ready after ${timeoutMs}ms for pid=${pid}, process still alive — extending wait`,
+    );
+    return waitForRegistry(pid, { timeoutMs: extendedMs, intervalMs });
+  }
+  return null;
+}
+
 /** Validate a string is a plausible UUID v4. */
 function isValidUUID(s) {
   return (
@@ -215,11 +239,12 @@ async function _startSession({
       buildArgs({ sessionId, resume: true, name, model, skipPermissions }),
       cwd,
     );
-    const entry = await waitForRegistry(pid);
+    const entry = await waitForRegistryWithExtension(pid);
 
     if (!entry) {
-      // Process died before writing registry (resume failed — e.g. session corrupted)
-      activePtys.delete(pid);
+      // Don't touch activePtys here. If the process is still alive the onExit
+      // handler will clean it up when it eventually exits. If it already exited,
+      // onExit already removed it.
       if (!allowFallbackToNew) {
         return {
           status: 'failed',
@@ -256,10 +281,10 @@ async function _spawnNew({ cwd, name, model, skipPermissions }) {
     }),
     cwd,
   );
-  const entry = await waitForRegistry(pid);
+  const entry = await waitForRegistryWithExtension(pid);
 
   if (!entry) {
-    activePtys.delete(pid);
+    // onExit handles activePtys cleanup whether the process is dead or still alive.
     return {
       status: 'failed',
       message: 'Spawn failed: process exited without writing registry entry',
@@ -340,6 +365,19 @@ async function _doStop(resolvedPid, expectedProcStart) {
   }
 
   cleanupPty();
+
+  // Wait for the process to truly die before returning. After SIGKILL the
+  // process briefly exists as a zombie (state='Z') until libuv reaps it via
+  // waitpid(). Without this wait the immediate rc:list refresh that the
+  // frontend fires on rc:stop:result would still see the zombie as alive.
+  const deadline = Date.now() + 1000;
+  while (
+    isProcessAlive(resolvedPid, expectedProcStart) &&
+    Date.now() < deadline
+  ) {
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
   logger.log(`[rc-launcher] Stopped pid=${resolvedPid}`);
   return { status: 'killed', pid: resolvedPid };
 }

@@ -76,12 +76,14 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
           {{ session.title || session.firstPrompt || 'Untitled' }}
         </span>
         <RcClaudeLink :live="liveBySessionId[session.sessionId]" />
-        <RcBadge
-          v-if="liveBySessionId[session.sessionId]"
-          :entrypoint="liveBySessionId[session.sessionId].entrypoint"
-          :status="liveBySessionId[session.sessionId].status"
-          :rc-active="liveBySessionId[session.sessionId].rcActive"
-        />
+        <template v-if="liveBySessionId[session.sessionId]">
+          <RcBadge
+            :entrypoint="liveBySessionId[session.sessionId].entrypoint"
+            :status="liveBySessionId[session.sessionId].status"
+            :rc-active="liveBySessionId[session.sessionId].rcActive"
+          />
+          <code class="session-id-short">{{ session.sessionId.slice(0, 8) }}</code>
+        </template>
         <span v-else class="session-time">{{ formatRelativeTime(session.modified) }}</span>
       </li>
       <li class="view-all-row" @click="emit('view-all')">
@@ -198,6 +200,13 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
 
 .session-time {
   flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.session-id-short {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
 }

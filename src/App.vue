@@ -6,18 +6,10 @@ import NewProjectModal from './components/NewProjectModal.vue';
 import PwaPrompt from './components/PwaPrompt.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
+import { useApi } from './composables/useApi';
 import { useBackButton } from './composables/useBackButton.js';
-import { useWebSocket } from './composables/useWebSocket';
 
-const {
-  connect,
-  disconnect,
-  connected,
-  recentSessions,
-  getRecentSessionsImmediate,
-  send,
-  onMessage,
-} = useWebSocket();
+const { recentSessions, getRecentSessionsImmediate, loadInfo } = useApi();
 
 const route = useRoute();
 
@@ -36,22 +28,6 @@ function closeSettings() {
 }
 
 useBackButton(showSettings, closeSettings, { mobileOnly: true });
-
-function updateSettings(newSettings) {
-  send({ type: 'update_settings', settings: newSettings });
-}
-
-function handleRestart() {
-  send({ type: 'restart' });
-}
-
-onMessage((msg) => {
-  if (msg.type === 'settings') {
-    settings.value = msg.settings;
-  } else if (msg.type === 'settings_updated' && msg.success) {
-    settings.value = msg.settings;
-  }
-});
 
 // ── Command palette (search) ────────────────────────────────
 const showPalette = ref(false);
@@ -149,15 +125,14 @@ function handleGlobalKeydown(e) {
   }
 }
 
+const isAuthRoute = () => route.name === 'auth';
+
 onMounted(() => {
-  connect(() => {
-    send({ type: 'get_settings' });
-  });
+  if (!isAuthRoute()) loadInfo();
   document.addEventListener('keydown', handleGlobalKeydown);
 });
 
 onUnmounted(() => {
-  disconnect();
   document.removeEventListener('keydown', handleGlobalKeydown);
   desktopMq.removeEventListener('change', onMqChange);
 });
@@ -165,7 +140,7 @@ onUnmounted(() => {
 
 <template>
   <div class="app" :class="{ 'sidebar-open': sidebarOpen && isDesktop }">
-    <Sidebar :open="sidebarOpen" @close="closeSidebar" @open-settings="openSettings" />
+    <Sidebar v-if="route.name !== 'auth'" :open="sidebarOpen" @close="closeSidebar" @open-settings="openSettings" />
     <div class="app-main">
       <router-view />
     </div>
@@ -174,11 +149,8 @@ onUnmounted(() => {
     <SettingsModal
       :show="showSettings"
       :settings="settings"
-      :connected="connected"
       :initial-tab="settingsInitialTab"
       @close="closeSettings"
-      @update="updateSettings"
-      @restart="handleRestart"
     />
     <PwaPrompt />
   </div>

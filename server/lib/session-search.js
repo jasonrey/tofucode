@@ -22,6 +22,11 @@ const PROJECTS_DIR = join(homedir(), '.claude', 'projects');
 const MAX_SNIPPETS_PER_SESSION = 3;
 const SNIPPET_RADIUS = 100; // chars either side of first token match
 
+/** True when query looks like a UUID fragment (all hex + dashes, at least 8 chars). */
+function looksLikeSessionId(q) {
+  return /^[0-9a-f-]+$/i.test(q) && q.length >= 8;
+}
+
 /** Extract plaintext from a JSONL entry. Returns empty string if non-text. */
 function extractText(entry) {
   if (entry.type === 'user' || entry.type === 'human') {
@@ -130,8 +135,12 @@ async function searchFile(filePath, tokens) {
         return;
       }
 
+      if (entry.type === 'custom-title' && entry.customTitle) {
+        nativeTitle = entry.customTitle;
+        return;
+      }
       if (entry.type === 'ai-title' && entry.aiTitle) {
-        nativeTitle = entry.aiTitle;
+        if (!nativeTitle) nativeTitle = entry.aiTitle; // custom-title takes priority
         return;
       }
 
@@ -155,6 +164,57 @@ async function searchFile(filePath, tokens) {
   });
 }
 
+/** Read session title from a JSONL file (custom-title > ai-title). */
+async function readTitle(filePath) {
+  return new Promise((resolve) => {
+    let customTitle = null;
+    let aiTitle = null;
+    const rl = createInterface({
+      input: createReadStream(filePath),
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
+    rl.on('line', (line) => {
+      if (!line.trim()) return;
+      try {
+        const e = JSON.parse(line);
+        if (e.type === 'custom-title' && e.customTitle)
+          customTitle = e.customTitle;
+        else if (e.type === 'ai-title' && e.aiTitle && !aiTitle)
+          aiTitle = e.aiTitle;
+      } catch {}
+    });
+    rl.on('close', () => resolve(customTitle ?? aiTitle ?? null));
+    rl.on('error', () => resolve(null));
+  });
+}
+
+/** Match files by session ID prefix (with or without dashes). */
+async function searchBySessionId(query, files, limit, signal) {
+  const q = query.toLowerCase().replace(/-/g, '');
+  const matched = files.filter(({ sessionId }) =>
+    sessionId.replace(/-/g, '').startsWith(q),
+  );
+
+  const items = [];
+  for (const { filePath, projectSlug: slug, sessionId } of matched.slice(
+    0,
+    limit,
+  )) {
+    if (signal?.aborted) break;
+    const title = await readTitle(filePath);
+    items.push({
+      sessionId,
+      projectSlug: slug,
+      projectName: getProjectDisplayName(slug),
+      title,
+      snippets: [],
+      timestamp: null,
+      matchCount: 1,
+    });
+  }
+  return { items, count: items.length, truncated: matched.length > limit };
+}
+
 /**
  * Search all sessions for the given query.
  *
@@ -176,6 +236,10 @@ export async function searchSessions(
   if (!tokens.length) return { items: [], count: 0, truncated: false };
 
   const files = collectFiles(projectSlug);
+
+  if (tokens.length === 1 && looksLikeSessionId(tokens[0])) {
+    return searchBySessionId(tokens[0], files, limit, signal);
+  }
   const items = [];
   let scanned = 0;
   let truncated = false;

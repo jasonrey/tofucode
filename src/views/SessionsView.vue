@@ -5,22 +5,20 @@ import AppHeader from '../components/AppHeader.vue';
 import RcBadge from '../components/RcBadge.vue';
 import RcClaudeLink from '../components/RcClaudeLink.vue';
 import RcControls from '../components/RcControls.vue';
-import { useWebSocket } from '../composables/useWebSocket';
+import { useApi } from '../composables/useApi';
 import { formatRelativeTime } from '../utils/format.js';
 
 const router = useRouter();
 const route = useRoute();
 const {
-  connected,
   sessions,
   selectedProject,
-  connect,
   selectProject,
   deleteSession,
   liveBySessionId,
   listRcSessions,
   startNewRcSession,
-} = useWebSocket();
+} = useApi();
 
 const projectSlug = computed(() => route.params.project);
 
@@ -35,22 +33,17 @@ const projectInfo = computed(() => {
   };
 });
 
-// Connect on mount and load sessions when ready
-onMounted(() => {
-  connect(() => {
-    // This callback runs once connection is ready
-    if (projectSlug.value) {
-      selectProject(projectSlug.value);
-    }
-    listRcSessions();
-  });
+// Load on mount and when slug changes
+onMounted(async () => {
+  if (projectSlug.value) {
+    await selectProject(projectSlug.value);
+  }
+  listRcSessions();
 });
 
 // Watch for project changes (when navigating via sidebar)
 watch(projectSlug, (newSlug) => {
-  if (connected.value && newSlug) {
-    selectProject(newSlug);
-  }
+  if (newSlug) selectProject(newSlug);
 });
 
 function selectSession(sessionId) {
@@ -86,10 +79,14 @@ async function startNewSession() {
 // Use shared utility
 const formatTime = formatRelativeTime;
 
-function handleDeleteSession(sessionId, event) {
+async function handleDeleteSession(sessionId, event) {
   event.stopPropagation();
   if (confirm('Are you sure you want to delete this session?')) {
-    deleteSession(sessionId);
+    try {
+      await deleteSession(projectSlug.value, sessionId);
+    } catch (err) {
+      alert(`Failed to delete session: ${err.message}`);
+    }
   }
 }
 </script>
@@ -177,7 +174,7 @@ function handleDeleteSession(sessionId, event) {
         </li>
       </ul>
 
-      <div class="empty" v-if="sessions.length === 0 && connected">
+      <div class="empty" v-if="sessions.length === 0 && selectedProject">
         <p>No sessions yet.</p>
         <p class="empty-hint">Click "New Session" above to begin.</p>
       </div>

@@ -1,38 +1,34 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import ChatMessages from '../components/ChatMessages.vue';
 import RcControls from '../components/RcControls.vue';
-import { useChatWebSocket, useWebSocket } from '../composables/useWebSocket';
+import { useApi, useChatApi } from '../composables/useApi';
 import { claudeUrl } from '../utils/slug.js';
 
 const route = useRoute();
 
-// Global WebSocket for live session awareness
-const { liveBySessionId, listRcSessions } = useWebSocket();
+// Global API for live session awareness
+const { liveBySessionId, listRcSessions } = useApi();
 
-// Scoped WebSocket for session history
+// Per-view API for session history
 const {
-  connected,
   messages,
   currentSession,
   currentProject,
   sessionTitle,
   hasOlderMessages,
   summaryCount,
-  sessionActiveElsewhere,
   contextReady,
   loadingOlderMessages,
   totalTurns,
   loadedTurns,
-  connect,
-  selectProject,
   selectSession,
   loadFullHistory,
   loadOlderMessages,
   clearMessages,
-} = useChatWebSocket();
+} = useChatApi();
 
 const projectSlug = computed(() => route.params.project);
 const sessionParam = computed(() => route.params.session);
@@ -67,14 +63,13 @@ async function copySessionId() {
 
 const chatMessagesRef = ref(null);
 
-// Load session when connected
+// Load session on route change
 watch(
-  [connected, projectSlug, sessionParam],
-  ([isConnected, slug, session]) => {
-    if (isConnected && slug && session) {
-      selectProject(slug);
+  [projectSlug, sessionParam],
+  ([slug, session]) => {
+    if (slug && session) {
       clearMessages();
-      nextTick(() => selectSession(session));
+      selectSession(slug, session);
     }
   },
   { immediate: true },
@@ -112,7 +107,6 @@ watch(
 );
 
 onMounted(() => {
-  connect();
   listRcSessions();
 });
 
@@ -121,7 +115,7 @@ onUnmounted(() => {});
 
 <template>
   <div class="chat-view">
-    <AppHeader :debug-session="currentSession">
+    <AppHeader>
       <template #content>
         <div class="header-breadcrumb">
           <div v-if="currentProject" class="breadcrumb-folder-group">
@@ -139,16 +133,6 @@ onUnmounted(() => {});
         </div>
       </template>
     </AppHeader>
-
-    <!-- Session active elsewhere notice -->
-    <div v-if="sessionActiveElsewhere" class="session-warning">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-        <line x1="12" y1="9" x2="12" y2="13"/>
-        <line x1="12" y1="17" x2="12.01" y2="17"/>
-      </svg>
-      <span>This session is open in another tab.</span>
-    </div>
 
     <!-- Message history (read-only) -->
     <ChatMessages

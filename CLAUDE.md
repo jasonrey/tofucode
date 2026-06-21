@@ -18,7 +18,7 @@ That changed: the Claude desktop app gained SSH environments, the mobile app gai
 ## Tech Stack
 
 - **Frontend**: Vue 3 + Vite + Vue Router (history mode)
-- **Backend**: Express 5 + WebSocket (ws)
+- **Backend**: Express 5 + REST HTTP API (`/api/v2`)
 - **RC spawning**: node-pty (`claude` is an interactive REPL — it exits on detached spawn without a PTY)
 
 ## Project Structure
@@ -26,17 +26,19 @@ That changed: the Claude desktop app gained SSH environments, the mobile app gai
 ```
 tofucode/
 ├── server/
-│   ├── index.js             # Express entry: auth API, static dist serving, WS upgrade
-│   ├── websocket.js         # WS event router (auth-gated)
+│   ├── index.js             # Express entry: auth API, static dist serving
 │   ├── config.js            # Config + pathToSlug/slugToPath utilities
-│   ├── events/              # One handler per WS event (see docs/backend-spec-v2.md)
 │   ├── lib/
+│   │   ├── api-auth.js          # requireAuth Express middleware (cookie-based)
 │   │   ├── session-registry.js  # Read-only view of ~/.claude/sessions/{pid}.json
 │   │   ├── rc-launcher.js       # Idempotent spawn/stop of claude --rc via node-pty
 │   │   ├── session-search.js    # Streaming JSONL full-text search
 │   │   ├── sessions.js          # JSONL parsing, history pagination
-│   │   └── auth.js, ws.js, projects.js, session-titles.js, folders.js, ...
-│   └── routes/upload.js
+│   │   ├── recent-sessions.js   # Cross-project recent sessions scan
+│   │   └── auth.js, projects.js, folders.js, ...
+│   └── routes/
+│       ├── upload.js
+│       └── v2/              # REST API routes (see docs/http-api-v2.md)
 ├── src/
 │   ├── views/
 │   │   ├── FolderView.vue       # Landing (/) — folder browser
@@ -51,9 +53,9 @@ tofucode/
 │   │   ├── CommandPalette.vue       # Ctrl+K — cross-session search
 │   │   ├── RcBadge.vue / RcControls.vue / RcClaudeLink.vue
 │   │   └── ChatMessages.vue / MessageItem.vue / ToolGroup.vue / ...
-│   ├── composables/useWebSocket.js  # Global singleton WS + scoped per-chat WS
-│   └── utils/slug.js                # Client mirror of server pathToSlug + claudeUrl()
-└── docs/backend-spec-v2.md  # Authoritative WS event reference
+│   ├── composables/useApi.js    # Global singleton HTTP API + useChatApi() per-ChatView
+│   └── utils/slug.js            # Client mirror of server pathToSlug + claudeUrl()
+└── docs/http-api-v2.md  # Authoritative HTTP API reference
 ```
 
 ## Key Concepts
@@ -70,11 +72,11 @@ Every running `claude` process writes `~/.claude/sessions/{pid}.json` (sessionId
 ### Slugs
 Project slug = path with `/` AND `.` replaced by `-`, leading dash (e.g. `/home/ts/projects/picotofu.com` → `-home-ts-projects-picotofu-com`). `src/utils/slug.js` mirrors `server/config.js pathToSlug` exactly — keep them in sync. Reverse mapping (`slugToPath`) probes the filesystem; never reconstruct paths client-side.
 
-### WebSocket architecture
-- **Global singleton** (`useWebSocket`): projects, recent sessions, live sessions (`rc:list` polled every 10s while visible), search, folder browsing. RC start/stop ops are serialized through a promise chain because results carry no correlation id.
-- **Scoped per-chat** (`useChatWebSocket`): one connection per ChatView for history loading/pagination.
+### HTTP API architecture
+- **Global singleton** (`useApi`): projects, recent sessions, live sessions (polled every 10s), search, folder browsing.
+- **Per-ChatView** (`useChatApi`): one instance per ChatView for history loading/pagination/older-messages.
 
-Event reference: `docs/backend-spec-v2.md` (17 events: projects, sessions, titles, `rc:list/start/stop`, `search:sessions`, `project:create`, `browse_folder`).
+API reference: `docs/http-api-v2.md`.
 
 ## Development
 

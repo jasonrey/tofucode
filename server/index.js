@@ -63,7 +63,6 @@ import { fileURLToPath } from 'node:url';
 import compress from 'compression';
 import express from 'express';
 import expressStaticGzip from 'express-static-gzip';
-import { WebSocketServer } from 'ws';
 import { config } from './config.js';
 import {
   isAuthDisabled,
@@ -84,7 +83,7 @@ import {
   initVersionChecker,
 } from './lib/version-checker.js';
 import { uploadAuthMiddleware, uploadHandler } from './routes/upload.js';
-import { handleWebSocket } from './websocket.js';
+import v2Router from './routes/v2/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -98,16 +97,6 @@ initVersionChecker(pkg.version);
 
 const app = express();
 const server = createServer(app);
-const wss = new WebSocketServer({
-  noServer: true,
-  maxPayload: 1024 * 1024, // 1MB max message size
-  perMessageDeflate: {
-    zlibDeflateOptions: { level: 3 },
-    clientNoContextTakeover: true,
-    serverNoContextTakeover: true,
-    threshold: 1024, // Only compress messages > 1KB
-  },
-});
 
 // Set reference for graceful shutdown
 httpServer = server;
@@ -258,6 +247,11 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // ============================================
+// HTTP API v2 (auth required)
+// ============================================
+app.use('/api/v2', v2Router);
+
+// ============================================
 // File Upload Route (auth required)
 // ============================================
 app.post('/api/upload', uploadAuthMiddleware, uploadHandler);
@@ -353,7 +347,6 @@ if (existsSync(distPath)) {
     if (
       req.method === 'GET' &&
       !req.path.startsWith('/api') &&
-      !req.path.startsWith('/ws') &&
       !req.path.startsWith('/docs') &&
       !req.path.startsWith('/assets')
     ) {
@@ -374,63 +367,6 @@ if (existsSync(distPath)) {
     }
   });
 }
-
-// ============================================
-// WebSocket upgrade handler with auth
-// ============================================
-server.on('upgrade', (request, socket, head) => {
-  // Check if this is a WebSocket upgrade to /ws
-  if (request.url !== '/ws') {
-    socket.destroy();
-    return;
-  }
-
-  // Validate Origin header to prevent Cross-Site WebSocket Hijacking (CSWSH)
-  const origin = request.headers.origin;
-  if (origin) {
-    try {
-      const originHost = new URL(origin).host;
-      const requestHost = request.headers.host;
-      if (originHost !== requestHost) {
-        logger.log(
-          `WebSocket upgrade rejected: origin ${origin} != host ${requestHost}`,
-        );
-        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-        socket.destroy();
-        return;
-      }
-    } catch {
-      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-  }
-
-  // Check auth (skip if disabled)
-  if (!isAuthDisabled()) {
-    const token = parseSessionCookie(request.headers.cookie);
-    if (!validateSession(token)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-  }
-
-  // Complete the upgrade
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    // Debug: log compression status
-    if (process.env.DEBUG === 'true') {
-      logger.log(
-        'WebSocket connected with extensions:',
-        ws.extensions || 'none',
-      );
-    }
-    wss.emit('connection', ws, request);
-  });
-});
-
-// WebSocket connection handler
-wss.on('connection', handleWebSocket);
 
 // POC: Retry binding logic for upgrade/restart scenarios
 // This enables inverted spawn strategy for self-updating
@@ -511,7 +447,6 @@ async function onServerReady() {
   logger.log(
     `tofucode v${getCurrentVersion()} running on http://localhost:${config.port}`,
   );
-  logger.log(`WebSocket available at ws://localhost:${config.port}/ws`);
   if (isAuthDisabled()) {
     logger.log('⚠️  Authentication is DISABLED');
   } else if (!isAuthSetup()) {

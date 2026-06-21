@@ -1,6 +1,6 @@
 <script setup>
-import { computed, nextTick, onUnmounted, ref } from 'vue';
-import { useWebSocket } from '../composables/useWebSocket';
+import { computed, nextTick, ref } from 'vue';
+import { useApi } from '../composables/useApi';
 
 const props = defineProps({
   // Label for the primary action on the current folder
@@ -24,8 +24,7 @@ const {
   homePath,
   rootPath,
   createProject,
-  onMessage,
-} = useWebSocket();
+} = useApi();
 
 // Directories only, dotfiles hidden, sorted alpha
 const folders = computed(() => {
@@ -100,25 +99,21 @@ function cancelCreating() {
   createError.value = '';
 }
 
-function confirmCreate() {
+async function confirmCreate() {
   const name = newName.value.trim();
   if (!name || !currentFolder.value || createPending.value) return;
   createPending.value = true;
   createError.value = '';
-  createProject(currentFolder.value, name);
-}
-
-const unsubCreate = onMessage((msg) => {
-  if (msg.type !== 'project:create:result' || !props.allowCreate) return;
-  createPending.value = false;
-  if (msg.status === 'ok') {
+  try {
+    const result = await createProject(currentFolder.value, name);
     cancelCreating();
-    emit('created', msg.projectSlug);
-  } else {
-    createError.value = msg.message || 'Failed to create folder';
+    emit('created', result.projectSlug);
+  } catch (err) {
+    createError.value = err.message || 'Failed to create folder';
+  } finally {
+    createPending.value = false;
   }
-});
-onUnmounted(() => unsubCreate());
+}
 </script>
 
 <template>
