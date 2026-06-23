@@ -18,13 +18,16 @@ const emit = defineEmits(['close', 'open-settings']);
 const route = useRoute();
 const router = useRouter();
 const {
+  projects,
+  projectsReady,
+  projectSessions,
   recentSessions,
-  sessionsReady,
   currentVersion,
   updateAvailable,
   liveSessions,
   liveBySessionId,
-  getRecentSessionsImmediate,
+  getProjects,
+  loadProjectSessions,
   listRcSessions,
   startNewRcSession,
   dismissUpdate,
@@ -43,30 +46,18 @@ function setTab(tab) {
   localStorage.setItem(TAB_KEY, tab);
 }
 
-// ── Unified project groups from recent sessions ─────────────
-const groups = computed(() => {
-  const map = new Map();
-  for (const session of recentSessions.value) {
-    let group = map.get(session.projectSlug);
-    if (!group) {
-      group = {
-        slug: session.projectSlug,
-        name: session.projectName,
-        path: session.projectPath,
-        sessions: [],
-        lastModified: session.modified,
-      };
-      map.set(session.projectSlug, group);
-    }
-    group.sessions.push(session);
-    if (session.modified > group.lastModified) {
-      group.lastModified = session.modified;
-    }
-  }
-  return [...map.values()].sort((a, b) =>
-    (b.lastModified || '').localeCompare(a.lastModified || ''),
-  );
-});
+// ── Project groups (folder list) ────────────────────────────
+// Sourced from the cheap stat-only /projects endpoint, already sorted by
+// recent activity server-side. Inner sessions load lazily on expand.
+const groups = computed(() => projects.value);
+
+function sessionsFor(slug) {
+  return projectSessions[slug]?.sessions ?? [];
+}
+function isLoadingSessions(slug) {
+  const entry = projectSessions[slug];
+  return !!entry?.loading && !entry?.loaded;
+}
 
 // ── Expand/collapse state (persisted) ───────────────────────
 const EXPANDED_KEY = 'tofucode:expanded-projects';
@@ -87,16 +78,18 @@ function toggleGroup(slug) {
     expanded.delete(slug);
   } else {
     expanded.add(slug);
+    loadProjectSessions(slug);
   }
   localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded]));
 }
 
-// Auto-expand the current route's project
+// Auto-expand the current route's project (and load its sessions)
 watch(
   () => route.params.project,
   (slug) => {
-    if (slug && !expanded.has(slug)) {
+    if (slug) {
       expanded.add(slug);
+      loadProjectSessions(slug);
     }
   },
   { immediate: true },
@@ -139,24 +132,52 @@ function viewAll(group) {
 }
 
 // ── Live tab: flat list of running sessions ─────────────────
-// Enrich live entries with title/project name from recentSessions
-const liveList = computed(() => {
-  const recentById = {};
-  for (const s of recentSessions.value) recentById[s.sessionId] = s;
-  return liveSessions.value.map((live) => {
-    const recent = recentById[live.sessionId];
-    return {
-      ...live,
-      title:
-        recent?.title ||
-        recent?.firstPrompt ||
-        live.sessionId?.slice(0, 8) ||
-        'Untitled',
-      projectName:
-        recent?.projectName || live.cwd?.split('/').pop() || live.projectSlug,
-    };
-  });
+// Project display names from the folder list (cheap, always loaded).
+const projectNameBySlug = computed(() => {
+  const map = {};
+  for (const p of projects.value) map[p.slug] = p.name;
+  return map;
 });
+
+// Resolve a session's title from the lazy per-project cache, falling back to
+// recent sessions (palette). Looked up per live entry — only the handful of
+// live sessions are resolved, not the whole cache.
+function titleFor(live) {
+  const known =
+    projectSessions[live.projectSlug]?.sessions.find(
+      (s) => s.sessionId === live.sessionId,
+    ) ?? recentSessions.value.find((s) => s.sessionId === live.sessionId);
+  return (
+    known?.title ||
+    known?.firstPrompt ||
+    live.sessionId?.slice(0, 8) ||
+    'Untitled'
+  );
+}
+
+const liveList = computed(() => {
+  const names = projectNameBySlug.value;
+  return liveSessions.value.map((live) => ({
+    ...live,
+    title: titleFor(live),
+    projectName:
+      names[live.projectSlug] || live.cwd?.split('/').pop() || live.projectSlug,
+  }));
+});
+
+// On the Live tab, lazily load sessions for just the projects that have a
+// live session, so their titles resolve without scanning everything.
+watch(
+  [activeTab, liveSessions],
+  () => {
+    if (activeTab.value !== 'live') return;
+    const slugs = new Set(
+      liveSessions.value.map((l) => l.projectSlug).filter(Boolean),
+    );
+    for (const slug of slugs) loadProjectSessions(slug);
+  },
+  { immediate: true },
+);
 
 function openLiveSession(live) {
   if (!live.projectSlug || !live.sessionId) return;
@@ -176,8 +197,11 @@ function handleDismissUpdate(e) {
 
 // ── Data fetching ───────────────────────────────────────────
 function fetchData() {
-  getRecentSessionsImmediate();
+  getProjects();
   listRcSessions();
+  // Refresh sessions for currently-expanded groups so externally-created
+  // sessions appear and counts stay in sync with the visible rows.
+  for (const slug of expanded) loadProjectSessions(slug, { force: true });
 }
 
 watch(
@@ -246,7 +270,7 @@ onMounted(fetchData);
     <!-- Recent tab: unified project/session list -->
     <div v-if="activeTab === 'recent'" class="sidebar-content">
       <!-- Skeleton while loading -->
-      <ul v-if="!sessionsReady" class="group-list">
+      <ul v-if="!projectsReady" class="group-list">
         <li v-for="i in 4" :key="i" class="skeleton-row">
           <div class="skeleton-line skeleton-title"></div>
           <div class="skeleton-line skeleton-meta"></div>
@@ -258,6 +282,8 @@ onMounted(fetchData);
           v-for="group in groups"
           :key="group.slug"
           :group="group"
+          :sessions="sessionsFor(group.slug)"
+          :loading="isLoadingSessions(group.slug)"
           :expanded="expanded.has(group.slug)"
           :live-by-session-id="liveBySessionId"
           :current-session="currentSession"

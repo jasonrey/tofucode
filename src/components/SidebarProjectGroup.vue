@@ -8,6 +8,16 @@ defineProps({
     type: Object,
     required: true,
   },
+  // Lazily-loaded session list for this project (empty until expanded).
+  sessions: {
+    type: Array,
+    default: () => [],
+  },
+  // True while this project's sessions are being fetched.
+  loading: {
+    type: Boolean,
+    default: false,
+  },
   expanded: {
     type: Boolean,
     default: false,
@@ -46,7 +56,7 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
         <path d="M9 18l6-6-6-6"/>
       </svg>
       <span class="group-name truncate">{{ group.name }}</span>
-      <span class="group-meta">{{ group.sessions.length }}</span>
+      <span class="group-meta">{{ group.sessionCount }}</span>
       <button
         class="group-new-btn"
         :disabled="starting"
@@ -63,10 +73,16 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
       </button>
     </div>
 
-    <!-- Sessions under this project -->
+    <!-- Sessions under this project (lazy-loaded on expand) -->
     <ul v-if="expanded" class="group-sessions">
+      <li v-if="loading && !sessions.length" class="session-loading">
+        <svg class="spin" width="12" height="12" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+        </svg>
+        <span>Loading…</span>
+      </li>
       <li
-        v-for="session in group.sessions"
+        v-for="session in sessions"
         :key="session.sessionId"
         class="session-row"
         :class="{ active: currentSession === session.sessionId }"
@@ -208,6 +224,15 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 10px;
+  color: var(--text-muted);
+}
+
+.session-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 28px;
+  font-size: 11px;
   color: var(--text-muted);
 }
 

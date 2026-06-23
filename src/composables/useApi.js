@@ -1,16 +1,21 @@
-import { computed, readonly, ref } from 'vue';
+import { computed, reactive, readonly, ref } from 'vue';
 
 // ── Global state (module-level singleton) ───────────────────────────────────
 const sessions = ref([]);
 const selectedProject = ref(null);
 const recentSessions = ref([]);
+// Folder list for the sidebar — cheap (stat-only) metadata, no session contents.
+const projects = ref([]);
+const projectsReady = ref(false);
+// Per-project session cache (lazy-loaded when a sidebar group is expanded).
+// slug -> { sessions: [], loading: bool, loaded: bool }
+const projectSessions = reactive({});
 const folderContents = ref([]);
 const currentFolder = ref(null);
 const currentVersion = ref(null);
 const updateAvailable = ref(null);
 const rootPath = ref(null);
 const homePath = ref(null);
-const sessionsReady = ref(false);
 const liveSessions = ref([]);
 const searchResults = ref([]);
 const searchTruncated = ref(false);
@@ -98,6 +103,48 @@ async function selectProject(slug) {
   }
 }
 
+// Folder list for the sidebar — sorted by recent activity, no session contents.
+async function getProjects() {
+  try {
+    const data = await apiFetch('/projects');
+    projects.value = data.projects;
+  } catch (err) {
+    console.error('[useApi] getProjects failed:', err.message);
+  } finally {
+    projectsReady.value = true;
+  }
+}
+
+// Lazily load a single project's session list (on sidebar group expand).
+// Cached per slug; concurrent/duplicate calls are coalesced. Pass
+// { force: true } to bypass the cache (e.g. after starting a new session).
+async function loadProjectSessions(slug, { force = false } = {}) {
+  const existing = projectSessions[slug];
+  if (!force && (existing?.loaded || existing?.loading)) return;
+  projectSessions[slug] = {
+    sessions: existing?.sessions ?? [],
+    loading: true,
+    loaded: existing?.loaded ?? false,
+  };
+  try {
+    const data = await apiFetch(
+      `/projects/${encodeURIComponent(slug)}/sessions`,
+    );
+    projectSessions[slug] = {
+      sessions: data.sessions ?? [],
+      loading: false,
+      loaded: true,
+    };
+  } catch (err) {
+    console.error('[useApi] loadProjectSessions failed:', err.message);
+    projectSessions[slug] = {
+      sessions: existing?.sessions ?? [],
+      loading: false,
+      loaded: existing?.loaded ?? false,
+    };
+  }
+}
+
 function getRecentSessionsImmediate() {
   if (recentSessionsDebounceTimer) clearTimeout(recentSessionsDebounceTimer);
   recentSessionsDebounceTimer = setTimeout(async () => {
@@ -107,8 +154,6 @@ function getRecentSessionsImmediate() {
       recentSessions.value = data.sessions;
     } catch (err) {
       console.error('[useApi] getRecentSessions failed:', err.message);
-    } finally {
-      sessionsReady.value = true;
     }
   }, 50);
 }
@@ -179,6 +224,15 @@ async function startRcSession(opts) {
   });
   listRcSessions();
   getRecentSessionsImmediate();
+  // Refresh the affected project's folder metadata + cached session list.
+  // Force-refresh if the group has ever been opened (entry exists), so a
+  // session started mid-load still appears.
+  if (opts.projectSlug) {
+    getProjects();
+    if (projectSessions[opts.projectSlug]) {
+      loadProjectSessions(opts.projectSlug, { force: true });
+    }
+  }
   return data;
 }
 
@@ -204,6 +258,13 @@ async function deleteSession(projectSlug, sessionId) {
   recentSessions.value = recentSessions.value.filter(
     (s) => s.sessionId !== sessionId,
   );
+  // Drop from the lazy per-project cache and decrement the folder's count.
+  const cached = projectSessions[projectSlug];
+  if (cached) {
+    cached.sessions = cached.sessions.filter((s) => s.sessionId !== sessionId);
+  }
+  const proj = projects.value.find((p) => p.slug === projectSlug);
+  if (proj && proj.sessionCount > 0) proj.sessionCount -= 1;
 }
 
 function dismissUpdate(version) {
@@ -217,7 +278,9 @@ export function useApi() {
     sessions: readonly(sessions),
     selectedProject: readonly(selectedProject),
     recentSessions: readonly(recentSessions),
-    sessionsReady: readonly(sessionsReady),
+    projects: readonly(projects),
+    projectsReady: readonly(projectsReady),
+    projectSessions: readonly(projectSessions),
     folderContents: readonly(folderContents),
     currentFolder: readonly(currentFolder),
     currentVersion: readonly(currentVersion),
@@ -231,6 +294,8 @@ export function useApi() {
     liveBySessionId,
     loadInfo,
     selectProject,
+    getProjects,
+    loadProjectSessions,
     getRecentSessionsImmediate,
     browseFolder,
     listRcSessions,
@@ -250,11 +315,19 @@ export function useChatApi() {
   const messages = ref([]);
   const currentProject = ref(null);
   const currentSession = ref(null);
-  const sessionTitle = computed(
-    () =>
-      recentSessions.value.find((s) => s.sessionId === currentSession.value)
-        ?.title ?? null,
-  );
+  const sessionTitle = computed(() => {
+    const sid = currentSession.value;
+    if (!sid) return null;
+    // Prefer the per-project lazy cache (loaded for the current project),
+    // then fall back to recent sessions (populated by the palette).
+    const slug = currentProject.value?.slug;
+    const cached = slug ? projectSessions[slug]?.sessions : null;
+    return (
+      cached?.find((s) => s.sessionId === sid)?.title ??
+      recentSessions.value.find((s) => s.sessionId === sid)?.title ??
+      null
+    );
+  });
   const hasOlderMessages = ref(false);
   const summaryCount = ref(0);
   const contextReady = ref(false);
@@ -266,6 +339,10 @@ export function useChatApi() {
   function _getProjectInfo(projectSlug) {
     if (selectedProject.value?.slug === projectSlug)
       return selectedProject.value;
+    // The folder list is loaded cheaply on app start — use it for name/path.
+    const project = projects.value.find((p) => p.slug === projectSlug);
+    if (project)
+      return { slug: projectSlug, name: project.name, path: project.path };
     const recent = recentSessions.value.find(
       (s) => s.projectSlug === projectSlug,
     );
@@ -285,6 +362,9 @@ export function useChatApi() {
     summaryCount.value = 0;
     contextReady.value = false;
     currentProject.value = _getProjectInfo(projectSlug);
+    // Warm the per-project cache so the title resolves even on a cold
+    // deep-link (independent of the sidebar being mounted).
+    loadProjectSessions(projectSlug);
 
     try {
       const data = await apiFetch(
