@@ -30,6 +30,7 @@ const {
   loadProjectSessions,
   listRcSessions,
   startNewRcSession,
+  stopRcSession,
   dismissUpdate,
 } = useApi();
 
@@ -187,6 +188,20 @@ function openLiveSession(live) {
   });
 }
 
+// Stop a live session in place — no need to open its history first.
+const stopping = reactive(new Set());
+async function stopLive(live) {
+  if (stopping.has(live.sessionId)) return;
+  stopping.add(live.sessionId);
+  try {
+    await stopRcSession({ sessionId: live.sessionId });
+  } catch (err) {
+    alert(`Failed to stop session: ${err.message}`);
+  } finally {
+    stopping.delete(live.sessionId);
+  }
+}
+
 // ── Upgrade ─────────────────────────────────────────────────
 function handleDismissUpdate(e) {
   e.stopPropagation();
@@ -244,6 +259,14 @@ onMounted(fetchData);
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
           <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+
+      <!-- Close button — only shown in overlay mode (≤1024px) -->
+      <button class="sidebar-icon-btn sidebar-close-btn" title="Close sidebar" @click="$emit('close')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </button>
     </div>
@@ -309,7 +332,6 @@ onMounted(fetchData);
           :key="live.sessionId"
           class="live-row"
           :class="{ active: currentSession === live.sessionId }"
-          @click="openLiveSession(live)"
         >
           <div class="live-main">
             <span class="live-title truncate">{{ live.title }}</span>
@@ -321,6 +343,26 @@ onMounted(fetchData);
             :status="live.status"
             :rc-active="live.rcActive"
           />
+          <div class="live-actions">
+            <button class="live-action-btn" title="Open history" @click="openLiveSession(live)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+            </button>
+            <button
+              class="live-action-btn live-stop-btn"
+              :disabled="stopping.has(live.sessionId)"
+              title="Stop session"
+              @click="stopLive(live)"
+            >
+              <svg v-if="stopping.has(live.sessionId)" class="spin" width="14" height="14" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+              </svg>
+              <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="5" y="5" width="14" height="14" rx="2"/>
+              </svg>
+            </button>
+          </div>
         </li>
       </ul>
       <div v-else class="sidebar-empty">
@@ -460,6 +502,13 @@ onMounted(fetchData);
   color: var(--text-primary);
 }
 
+/* Close button: hidden on desktop (sidebar is a permanent column), shown
+   only when the sidebar is an overlay (≤1024px) where the hamburger toggle
+   is covered. */
+.sidebar-close-btn {
+  display: none;
+}
+
 /* Tabs */
 .sidebar-tabs {
   display: flex;
@@ -520,7 +569,6 @@ onMounted(fetchData);
   gap: 8px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  cursor: pointer;
   list-style: none;
   transition: background 0.1s;
 }
@@ -531,6 +579,41 @@ onMounted(fetchData);
 
 .live-row.active {
   background: var(--bg-tertiary);
+}
+
+.live-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.live-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.live-action-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.live-stop-btn:hover:not(:disabled) {
+  color: var(--error-color);
+  background: color-mix(in srgb, var(--error-color) 12%, transparent);
+}
+
+.live-action-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .live-main {
@@ -642,6 +725,11 @@ onMounted(fetchData);
     height: auto;
     z-index: 200;
     width: var(--sidebar-width);
+  }
+
+  /* The hamburger toggle is covered by the overlay, so expose a close button */
+  .sidebar-close-btn {
+    display: flex;
   }
 }
 

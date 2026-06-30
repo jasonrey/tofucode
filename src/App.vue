@@ -9,7 +9,7 @@ import Sidebar from './components/Sidebar.vue';
 import { useApi } from './composables/useApi';
 import { useBackButton } from './composables/useBackButton.js';
 
-const { recentSessions, getRecentSessionsImmediate, loadInfo } = useApi();
+const { loadInfo } = useApi();
 
 const route = useRoute();
 
@@ -34,7 +34,6 @@ const showPalette = ref(false);
 
 function openPalette() {
   showPalette.value = true;
-  getRecentSessionsImmediate();
 }
 
 function closePalette() {
@@ -144,7 +143,7 @@ onUnmounted(() => {
     <div class="app-main">
       <router-view />
     </div>
-    <CommandPalette :show="showPalette" :sessions="recentSessions" @close="closePalette" />
+    <CommandPalette :show="showPalette" @close="closePalette" />
     <NewProjectModal :show="showNewProject" @close="closeNewProject" />
     <SettingsModal
       :show="showSettings"

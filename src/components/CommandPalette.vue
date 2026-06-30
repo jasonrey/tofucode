@@ -9,153 +9,183 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  sessions: {
-    type: Array,
-    default: () => [],
-  },
 });
 
 const emit = defineEmits(['close']);
 
 const router = useRouter();
 const {
-  searchResults,
-  searchLoading,
-  searchTruncated,
-  searchSessions,
-  clearSearch,
+  projects,
+  projectSessions,
+  liveBySessionId,
+  getProjects,
+  loadProjectSessions,
+  startNewRcSession,
 } = useApi();
 
-const searchQuery = ref('');
+// ── Navigation state ────────────────────────────────────────
+// Two levels: 'projects' (fuzzy folder filter) → 'sessions' (selected
+// project's sessions + quick-start). No full-text scan — everything here
+// comes from data already loaded cheaply (the /projects list + lazy
+// per-project session cache).
+const mode = ref('projects');
+const selectedProjectSlug = ref(null);
+const query = ref('');
 const selectedIndex = ref(0);
+const startingSlug = ref(null);
 const inputRef = ref(null);
 
-// Full-text search debounce
-let searchTimer = null;
-watch(searchQuery, (val) => {
-  clearTimeout(searchTimer);
-  if (!val.trim()) {
-    clearSearch();
-    return;
-  }
-  searchTimer = setTimeout(() => searchSessions(val.trim()), 300);
-});
-
-// Group recent sessions by project (shown only when not searching)
-const groupedSessions = computed(() => {
-  const groups = {};
-  for (const session of props.sessions) {
-    const projectSlug = session.projectSlug;
-    if (!groups[projectSlug]) {
-      groups[projectSlug] = {
-        projectSlug,
-        projectName: session.projectName,
-        sessions: [],
-      };
-    }
-    groups[projectSlug].sessions.push(session);
-  }
-
-  return Object.values(groups)
-    .map((group) => ({
-      ...group,
-      sessions: group.sessions.slice(0, 5),
-    }))
-    .slice(0, 10);
-});
-
-// Whether the server full-text results are the visible list
-const showingSearchResults = computed(
-  () => !!searchQuery.value && searchResults.value.length > 0,
+const selectedProject = computed(() =>
+  projects.value.find((p) => p.slug === selectedProjectSlug.value),
 );
 
-// Flatten the VISIBLE list for keyboard navigation. With an active query the
-// only navigable list is the server search results (empty while loading or
-// when nothing matched); otherwise the grouped recent sessions.
-const flattenedItems = computed(() => {
-  if (searchQuery.value.trim()) {
-    return showingSearchResults.value ? searchResults.value : [];
-  }
-  const items = [];
-  for (const group of groupedSessions.value) {
-    for (const session of group.sessions) {
-      items.push({
-        ...session,
-        projectName: group.projectName,
-      });
-    }
-  }
-  return items;
+function matches(haystack) {
+  return (haystack || '')
+    .toLowerCase()
+    .includes(query.value.trim().toLowerCase());
+}
+
+// Level 1: projects filtered by query (already sorted by recent activity).
+const filteredProjects = computed(() => {
+  if (!query.value.trim()) return projects.value;
+  return projects.value.filter((p) => matches(p.name) || matches(p.slug));
 });
 
+// Level 2: the selected project's sessions, filtered by query on title/prompt.
+const sessionsEntry = computed(() =>
+  selectedProjectSlug.value ? projectSessions[selectedProjectSlug.value] : null,
+);
+const sessionsLoading = computed(
+  () => !!sessionsEntry.value?.loading && !sessionsEntry.value?.loaded,
+);
+const filteredSessions = computed(() => {
+  const list = sessionsEntry.value?.sessions ?? [];
+  if (!query.value.trim()) return list;
+  return list.filter((s) => matches(s.title) || matches(s.firstPrompt));
+});
+
+// Flattened, keyboard-navigable list of the visible items.
+const navItems = computed(() => {
+  if (mode.value === 'projects') {
+    return filteredProjects.value.map((p) => ({ kind: 'project', project: p }));
+  }
+  return [
+    { kind: 'start', slug: selectedProjectSlug.value },
+    ...filteredSessions.value.map((s) => ({ kind: 'session', session: s })),
+  ];
+});
+
+watch(navItems, () => {
+  selectedIndex.value = 0;
+});
+
+// ── Actions ─────────────────────────────────────────────────
+function enterProject(slug) {
+  mode.value = 'sessions';
+  selectedProjectSlug.value = slug;
+  query.value = '';
+  selectedIndex.value = 0;
+  loadProjectSessions(slug);
+  nextTick(() => inputRef.value?.focus());
+}
+
+function back() {
+  mode.value = 'projects';
+  selectedProjectSlug.value = null;
+  query.value = '';
+  selectedIndex.value = 0;
+  nextTick(() => inputRef.value?.focus());
+}
+
+function openSession(session) {
+  emit('close');
+  router.push({
+    name: 'chat',
+    params: { project: selectedProjectSlug.value, session: session.sessionId },
+  });
+}
+
+async function startSession(slug) {
+  if (startingSlug.value) return;
+  startingSlug.value = slug;
+  try {
+    const result = await startNewRcSession(slug);
+    if (result.sessionId) {
+      emit('close');
+      router.push({
+        name: 'chat',
+        params: { project: slug, session: result.sessionId },
+      });
+    } else {
+      alert(result.message || 'Failed to start session');
+    }
+  } catch (err) {
+    alert(`Failed to start session: ${err.message}`);
+  } finally {
+    startingSlug.value = null;
+  }
+}
+
+function activate(item) {
+  if (!item) return;
+  if (item.kind === 'project') enterProject(item.project.slug);
+  else if (item.kind === 'session') openSession(item.session);
+  else if (item.kind === 'start') startSession(item.slug);
+}
+
+// ── Lifecycle ───────────────────────────────────────────────
 watch(
   () => props.show,
   (isVisible) => {
     if (isVisible) {
-      searchQuery.value = '';
-      selectedIndex.value = 0;
+      back();
+      getProjects();
       nextTick(() => inputRef.value?.focus());
       document.addEventListener('keydown', handleKeydown);
     } else {
       document.removeEventListener('keydown', handleKeydown);
-      clearSearch();
     }
   },
 );
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown);
-  clearTimeout(searchTimer);
-});
-
-watch(flattenedItems, () => {
-  selectedIndex.value = 0;
 });
 
 function handleKeydown(e) {
   if (e.key === 'Escape') {
     e.preventDefault();
-    emit('close');
+    if (mode.value === 'sessions') back();
+    else emit('close');
     return;
   }
-
+  // Backspace on an empty query in sessions mode steps back to projects.
+  if (e.key === 'Backspace' && mode.value === 'sessions' && !query.value) {
+    e.preventDefault();
+    back();
+    return;
+  }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    if (selectedIndex.value < flattenedItems.value.length - 1) {
-      selectedIndex.value++;
-    }
+    if (selectedIndex.value < navItems.value.length - 1) selectedIndex.value++;
     return;
   }
-
   if (e.key === 'ArrowUp') {
     e.preventDefault();
     if (selectedIndex.value > 0) selectedIndex.value--;
     return;
   }
-
   if (e.key === 'Enter') {
     e.preventDefault();
-    const item = flattenedItems.value[selectedIndex.value];
-    if (item) selectSession(item);
+    activate(navItems.value[selectedIndex.value]);
   }
 }
 
-function selectSession(session) {
-  if (!session) return;
-  emit('close');
-  router.push({
-    name: 'chat',
-    params: { project: session.projectSlug, session: session.sessionId },
-  });
-}
-
-function flatIndexOf(session) {
-  return flattenedItems.value.findIndex(
-    (i) => i.sessionId === session.sessionId,
-  );
-}
-
-const formatTime = formatRelativeTime;
+const placeholder = computed(() =>
+  mode.value === 'projects'
+    ? 'Search projects…'
+    : `Search sessions in ${selectedProject.value?.name ?? 'project'}…`,
+);
 </script>
 
 <template>
@@ -163,75 +193,97 @@ const formatTime = formatRelativeTime;
     <div v-if="show" class="palette-overlay" @click="$emit('close')">
       <div class="palette" @click.stop>
         <div class="palette-input-wrapper">
-          <svg class="palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button v-if="mode === 'sessions'" class="palette-back" title="Back (esc)" @click="back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 18l-6-6 6-6"/>
+            </svg>
+          </button>
+          <svg v-else class="palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/>
             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
           <input
             ref="inputRef"
-            v-model="searchQuery"
+            v-model="query"
             type="text"
             class="palette-input"
-            placeholder="Search sessions..."
+            :placeholder="placeholder"
           />
           <kbd class="palette-hint">esc</kbd>
         </div>
 
-        <!-- Full-text search results -->
-        <div v-if="showingSearchResults" class="palette-results">
-          <div class="palette-section">
-            <div class="section-label">Sessions matching "{{ searchQuery }}"</div>
+        <!-- Level 1: projects -->
+        <div v-if="mode === 'projects'" class="palette-results">
+          <template v-if="filteredProjects.length">
             <div
-              v-for="(item, index) in searchResults"
-              :key="item.sessionId"
+              v-for="(item, index) in navItems"
+              :key="item.project.slug"
               class="palette-item"
               :class="{ selected: index === selectedIndex }"
-              @click="selectSession(item)"
+              @click="activate(item)"
               @mouseenter="selectedIndex = index"
             >
-              <span class="item-icon">💬</span>
+              <span class="item-icon">📁</span>
               <div class="item-content">
-                <span class="item-title">{{ item.title || item.sessionId.slice(0, 8) }}</span>
-                <span class="item-meta">{{ item.projectName }}</span>
+                <span class="item-title">{{ item.project.name }}</span>
               </div>
-              <div v-if="item.snippets?.[0]" class="item-snippet">{{ item.snippets[0] }}</div>
+              <span class="item-count">{{ item.project.sessionCount }}</span>
+              <svg class="item-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 18l6-6-6-6"/>
+              </svg>
             </div>
-            <div v-if="searchTruncated" class="section-note">Showing top results — type more to narrow</div>
+          </template>
+          <div v-else class="palette-empty">
+            <p>No projects found</p>
           </div>
         </div>
 
-        <!-- Searching indicator -->
-        <div v-else-if="searchQuery && searchLoading" class="palette-empty">
-          <p>Searching…</p>
-        </div>
+        <!-- Level 2: a project's sessions + quick start -->
+        <div v-else class="palette-results">
+          <div
+            class="palette-item palette-item-start"
+            :class="{ selected: selectedIndex === 0 }"
+            @click="activate(navItems[0])"
+            @mouseenter="selectedIndex = 0"
+          >
+            <span v-if="startingSlug === selectedProjectSlug" class="item-icon">
+              <svg class="spin" width="14" height="14" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <span v-else class="item-icon">＋</span>
+            <div class="item-content">
+              <span class="item-title">
+                {{ startingSlug === selectedProjectSlug ? 'Starting…' : 'Start new session here' }}
+              </span>
+            </div>
+          </div>
 
-        <!-- No results -->
-        <div v-else-if="searchQuery && !searchLoading && !searchResults.length" class="palette-empty">
-          <p>No sessions found</p>
-        </div>
-
-        <!-- Recent sessions grouped by project -->
-        <div v-else-if="groupedSessions.length > 0" class="palette-results">
-          <template v-for="group in groupedSessions" :key="group.projectSlug">
-            <div class="palette-group-label">{{ group.projectName }}</div>
+          <div v-if="sessionsLoading" class="palette-empty">
+            <p>Loading sessions…</p>
+          </div>
+          <template v-else>
             <div
-              v-for="session in group.sessions"
-              :key="session.sessionId"
-              class="palette-item palette-item-session"
-              :class="{ selected: flattenedItems[selectedIndex]?.sessionId === session.sessionId }"
-              @click="selectSession(session)"
-              @mouseenter="selectedIndex = flatIndexOf(session)"
+              v-for="(item, index) in navItems.slice(1)"
+              :key="item.session.sessionId"
+              class="palette-item"
+              :class="{ selected: index + 1 === selectedIndex }"
+              @click="activate(item)"
+              @mouseenter="selectedIndex = index + 1"
             >
-              <div class="palette-item-content">
-                <span class="palette-item-title">{{ session.title || session.firstPrompt || 'Untitled' }}</span>
+              <span class="item-icon">💬</span>
+              <div class="item-content">
+                <span class="item-title">
+                  {{ item.session.title || item.session.firstPrompt || 'Untitled' }}
+                </span>
               </div>
-              <span class="palette-item-time">{{ formatTime(session.modified) }}</span>
+              <span v-if="liveBySessionId[item.session.sessionId]" class="item-live">● live</span>
+              <span v-else class="item-count">{{ formatRelativeTime(item.session.modified) }}</span>
+            </div>
+            <div v-if="!filteredSessions.length" class="palette-empty">
+              <p>No sessions{{ query ? ' matching “' + query + '”' : '' }}</p>
             </div>
           </template>
-        </div>
-
-        <div v-else class="palette-empty">
-          <p>No recent sessions</p>
         </div>
       </div>
     </div>
@@ -276,6 +328,20 @@ const formatTime = formatRelativeTime;
   color: var(--text-muted);
 }
 
+.palette-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+
+.palette-back:hover {
+  color: var(--text-primary);
+}
+
 .palette-input {
   flex: 1;
   font-size: 14px;
@@ -302,19 +368,9 @@ const formatTime = formatRelativeTime;
   padding: 8px;
 }
 
-.palette-group-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 8px 12px 4px;
-}
-
 .palette-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
@@ -331,54 +387,15 @@ const formatTime = formatRelativeTime;
   background: var(--bg-tertiary);
 }
 
-.palette-item-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.palette-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.palette-item-time {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.palette-empty {
-  padding: 32px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-/* Search results section */
-.palette-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.section-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 6px 12px 4px;
+.palette-item-start {
+  color: var(--text-secondary);
 }
 
 .item-icon {
   flex-shrink: 0;
   font-size: 14px;
+  display: flex;
+  align-items: center;
 }
 
 .item-content {
@@ -398,28 +415,27 @@ const formatTime = formatRelativeTime;
   text-overflow: ellipsis;
 }
 
-.item-meta {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.item-snippet {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.item-count {
   flex-shrink: 0;
-  max-width: 200px;
-}
-
-.section-note {
   font-size: 11px;
   color: var(--text-muted);
-  padding: 4px 12px 6px;
-  font-style: italic;
+}
+
+.item-live {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--success-color);
+}
+
+.item-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.palette-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 </style>
