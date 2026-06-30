@@ -1,10 +1,13 @@
 /**
- * RC Launcher — idempotent spawn/stop of claude --rc sessions.
+ * RC Launcher — idempotent spawn/stop of claude --rc sessions via tmux.
  *
- * Requires node-pty: claude is an interactive REPL that exits immediately
- * if stdin is not a TTY. We allocate a PTY and hold it open as long as
- * the tofucode server is running. The PTY fd keeps the REPL alive;
- * we do not relay output (claude's RC bridge handles all IO to the native app).
+ * Each session runs in a detached tmux window named cc-<first8ofSessionId>.
+ * The tmux window provides the PTY that claude needs to stay alive as an
+ * interactive REPL. The process inside the pane is claude directly (via `exec`)
+ * so #{pane_pid} == claude PID — no shell child to hunt.
+ *
+ * SSH fallback: `tmux attach -t cc-<name>` from any SSH session for manual
+ * intervention without going through tofucode.
  *
  * State machine (startSession):
  *   1. Resolve projectSlug → cwd; missing dir → failed
@@ -15,24 +18,31 @@
  *   5. On timeout/exit: if allowFallbackToNew, retry as new session; else failed
  */
 
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import pty from 'node-pty';
 import { pathToSlug, slugToPath } from '../config.js';
 import { logger } from './logger.js';
 import {
   findLiveBySessionId,
   isProcessAlive,
+  isProcessRunning,
   readRegistryFile,
 } from './session-registry.js';
 
 const PROJECTS_DIR = join(homedir(), '.claude', 'projects');
 
-// Active PTY map: pid → ptyProcess. Kept alive as long as the server runs.
-// On SIGTERM/SIGINT, the PTY processes get their SIGHUP from the OS anyway.
-const activePtys = new Map();
+// Active tmux sessions spawned by this server: tmuxName → { innerPid }
+// Used to extend the registry wait if the process is still alive but slow to
+// write its registry file.
+const activeTmuxSessions = new Map();
+
+/** Derive a stable tmux session name from a session UUID. */
+function tmuxName(sessionId) {
+  return `cc-${sessionId.slice(0, 8)}`;
+}
 
 /** Build claude argv. RC is always on via global remoteControlAtStartup setting. */
 function buildArgs({
@@ -54,28 +64,57 @@ function buildArgs({
   return args;
 }
 
-/** Allocate a PTY and spawn claude. Returns the pid. */
-function spawnPty(args, cwd) {
-  const ptyProcess = pty.spawn('claude', args, {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
-    cwd,
+/**
+ * Spawn claude inside a detached tmux session.
+ *
+ * Uses `exec` so the shell is replaced by claude — #{pane_pid} equals the
+ * claude PID directly, matching the ~/.claude/sessions/{pid}.json filename.
+ *
+ * Returns the inner (claude) PID.
+ */
+/** Single-quote a shell argument, escaping any internal single quotes. */
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, "'\\''")}'`;
+}
+
+function spawnTmux(args, cwd, name) {
+  // exec replaces the shell so tmux pane_pid == claude pid.
+  // Each arg is single-quoted so spaces and metacharacters in --name / --model
+  // are passed verbatim to claude rather than being interpreted by the shell.
+  const shellCmd = `exec claude ${args.map(shellQuote).join(' ')}`;
+
+  execFileSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd, shellCmd], {
     env: process.env,
   });
-  activePtys.set(ptyProcess.pid, ptyProcess);
 
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    activePtys.delete(ptyProcess.pid);
-    logger.log(
-      `[rc-launcher] PTY exited pid=${ptyProcess.pid} code=${exitCode} signal=${signal}`,
-    );
-  });
+  const pidStr = execFileSync(
+    'tmux',
+    ['list-panes', '-t', name, '-F', '#{pane_pid}'],
+    { encoding: 'utf8' },
+  ).trim();
+  const innerPid = Number.parseInt(pidStr, 10);
+  if (Number.isNaN(innerPid)) {
+    killTmuxSession(name);
+    throw new Error(`tmux list-panes returned no pid for session ${name}`);
+  }
 
+  activeTmuxSessions.set(name, { innerPid });
   logger.log(
-    `[rc-launcher] Spawned claude pid=${ptyProcess.pid} args=${args.join(' ')} cwd=${cwd}`,
+    `[rc-launcher] Spawned tmux=${name} innerPid=${innerPid} args=${args.join(' ')} cwd=${cwd}`,
   );
-  return ptyProcess.pid;
+  return innerPid;
+}
+
+/**
+ * Kill a tmux session by name. Safe to call even if the session no longer
+ * exists — tmux exits non-zero in that case, which we swallow.
+ */
+function killTmuxSession(name) {
+  try {
+    execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' });
+  } catch {
+    // Session already gone — not an error
+  }
 }
 
 /**
@@ -99,8 +138,6 @@ async function waitForRegistry(
  * Like waitForRegistry, but if the first wait times out and the process is
  * still alive (just slow to write its registry file), extends the wait by
  * extendedMs rather than immediately declaring failure.
- *
- * This prevents false "failed" results when the VM is under load at startup.
  */
 async function waitForRegistryWithExtension(
   pid,
@@ -109,8 +146,10 @@ async function waitForRegistryWithExtension(
   const entry = await waitForRegistry(pid, { timeoutMs, intervalMs });
   if (entry) return entry;
 
-  // If the PTY process is still alive it's just slow — give it more time.
-  if (activePtys.has(pid)) {
+  // If the process is still alive it's just slow — give it more time.
+  // isProcessRunning (signal-0 only) is correct here: we have no procStart yet
+  // since the registry entry hasn't appeared.
+  if (isProcessRunning(pid)) {
     logger.log(
       `[rc-launcher] Registry not ready after ${timeoutMs}ms for pid=${pid}, process still alive — extending wait`,
     );
@@ -234,17 +273,18 @@ async function _startSession({
       );
     }
 
-    // Spawn resume
-    const pid = spawnPty(
+    // Spawn resume — session ID known upfront, tmux name stable
+    const tname = tmuxName(sessionId);
+    const pid = spawnTmux(
       buildArgs({ sessionId, resume: true, name, model, skipPermissions }),
       cwd,
+      tname,
     );
     const entry = await waitForRegistryWithExtension(pid);
 
     if (!entry) {
-      // Don't touch activePtys here. If the process is still alive the onExit
-      // handler will clean it up when it eventually exits. If it already exited,
-      // onExit already removed it.
+      killTmuxSession(tname);
+      activeTmuxSessions.delete(tname);
       if (!allowFallbackToNew) {
         return {
           status: 'failed',
@@ -260,7 +300,7 @@ async function _startSession({
     }
 
     logger.log(
-      `[rc-launcher] Resumed session pid=${pid} sessionId=${entry.sessionId}`,
+      `[rc-launcher] Resumed session tmux=${tname} pid=${pid} sessionId=${entry.sessionId}`,
     );
     return { status: 'resumed', pid, sessionId: entry.sessionId };
   }
@@ -270,8 +310,11 @@ async function _startSession({
 }
 
 async function _spawnNew({ cwd, name, model, skipPermissions }) {
+  // UUID generated before spawn — tmux session named from it immediately.
+  // No gap: we always know the session ID upfront.
   const newSessionId = randomUUID();
-  const pid = spawnPty(
+  const tname = tmuxName(newSessionId);
+  const pid = spawnTmux(
     buildArgs({
       sessionId: newSessionId,
       resume: false,
@@ -280,11 +323,13 @@ async function _spawnNew({ cwd, name, model, skipPermissions }) {
       skipPermissions,
     }),
     cwd,
+    tname,
   );
   const entry = await waitForRegistryWithExtension(pid);
 
   if (!entry) {
-    // onExit handles activePtys cleanup whether the process is dead or still alive.
+    killTmuxSession(tname);
+    activeTmuxSessions.delete(tname);
     return {
       status: 'failed',
       message: 'Spawn failed: process exited without writing registry entry',
@@ -292,7 +337,7 @@ async function _spawnNew({ cwd, name, model, skipPermissions }) {
   }
 
   logger.log(
-    `[rc-launcher] New session started pid=${pid} sessionId=${entry.sessionId}`,
+    `[rc-launcher] New session started tmux=${tname} pid=${pid} sessionId=${entry.sessionId}`,
   );
   return { status: 'started', pid, sessionId: entry.sessionId };
 }
@@ -325,27 +370,17 @@ export async function stopSession({ pid, sessionId } = {}) {
   const lockSid = registryEntry.sessionId;
   if (lockSlug && lockSid) {
     return withLock(`${lockSlug}::${lockSid}`, () =>
-      _doStop(resolvedPid, registryEntry.procStart),
+      _doStop(resolvedPid, registryEntry.procStart, registryEntry.sessionId),
     );
   }
-  return _doStop(resolvedPid, registryEntry.procStart);
+  return _doStop(resolvedPid, registryEntry.procStart, registryEntry.sessionId);
 }
 
-async function _doStop(resolvedPid, expectedProcStart) {
+async function _doStop(resolvedPid, expectedProcStart, sessionId) {
   // Re-validate: process may have exited between resolution and lock acquisition
   if (!isProcessAlive(resolvedPid, expectedProcStart)) {
     return { status: 'not_found', pid: resolvedPid };
   }
-
-  const cleanupPty = () => {
-    const ptyProcess = activePtys.get(resolvedPid);
-    if (ptyProcess) {
-      try {
-        ptyProcess.kill();
-      } catch {}
-      activePtys.delete(resolvedPid);
-    }
-  };
 
   // SIGTERM → wait 2s → SIGKILL
   try {
@@ -360,16 +395,18 @@ async function _doStop(resolvedPid, expectedProcStart) {
     logger.error(
       `[rc-launcher] kill failed pid=${resolvedPid}: ${err.message}`,
     );
-    cleanupPty();
+    if (sessionId) killTmuxSession(tmuxName(sessionId));
     return { status: 'not_found', pid: resolvedPid };
   }
 
-  cleanupPty();
+  // Clean up the tmux session so it doesn't linger as a dead window
+  if (sessionId) {
+    const tname = tmuxName(sessionId);
+    killTmuxSession(tname);
+    activeTmuxSessions.delete(tname);
+  }
 
-  // Wait for the process to truly die before returning. After SIGKILL the
-  // process briefly exists as a zombie (state='Z') until libuv reaps it via
-  // waitpid(). Without this wait the immediate rc:list refresh that the
-  // frontend fires on rc:stop:result would still see the zombie as alive.
+  // Wait for the process to truly die before returning (zombie reap window)
   const deadline = Date.now() + 1000;
   while (
     isProcessAlive(resolvedPid, expectedProcStart) &&
@@ -378,17 +415,64 @@ async function _doStop(resolvedPid, expectedProcStart) {
     await new Promise((r) => setTimeout(r, 30));
   }
 
-  logger.log(`[rc-launcher] Stopped pid=${resolvedPid}`);
+  logger.log(
+    `[rc-launcher] Stopped pid=${resolvedPid} tmux=${sessionId ? tmuxName(sessionId) : 'unknown'}`,
+  );
   return { status: 'killed', pid: resolvedPid };
 }
 
-/** Kill all PTYs owned by this server process (called on graceful shutdown). */
-export function killAllManagedPtys() {
-  for (const [pid, ptyProcess] of activePtys) {
-    try {
-      ptyProcess.kill();
-      logger.log(`[rc-launcher] Killed managed PTY pid=${pid} on shutdown`);
-    } catch {}
+/**
+ * Kill all tmux sessions owned by this server process (called on graceful shutdown).
+ */
+export function killAllManagedSessions() {
+  for (const [name] of activeTmuxSessions) {
+    killTmuxSession(name);
+    logger.log(`[rc-launcher] Killed tmux session ${name} on shutdown`);
   }
-  activePtys.clear();
+  activeTmuxSessions.clear();
+}
+
+/**
+ * Kill any cc-* tmux sessions whose inner process is no longer alive.
+ * Call on server startup to clean up sessions left over from a previous run.
+ */
+export function cleanupOrphanedTmuxSessions() {
+  let sessionNames;
+  try {
+    const out = execFileSync(
+      'tmux',
+      ['list-sessions', '-F', '#{session_name}'],
+      {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    );
+    sessionNames = out
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.startsWith('cc-'));
+  } catch {
+    return; // tmux not running or no sessions — nothing to clean up
+  }
+
+  for (const name of sessionNames) {
+    try {
+      const pidStr = execFileSync(
+        'tmux',
+        ['list-panes', '-t', name, '-F', '#{pane_pid}'],
+        { encoding: 'utf8' },
+      ).trim();
+      const innerPid = Number.parseInt(pidStr, 10);
+      if (Number.isNaN(innerPid) || !isProcessRunning(innerPid)) {
+        killTmuxSession(name);
+        logger.log(
+          `[rc-launcher] Cleaned up orphaned tmux session ${name} (pid=${innerPid} dead)`,
+        );
+      }
+    } catch {
+      // Can't inspect — kill it to be safe
+      killTmuxSession(name);
+      logger.log(`[rc-launcher] Cleaned up uninspectable tmux session ${name}`);
+    }
+  }
 }

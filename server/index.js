@@ -26,9 +26,9 @@ async function gracefulShutdown(signal) {
 
   try {
     // Kill all RC sessions spawned by this server
-    const { killAllManagedPtys } = await import('./lib/rc-launcher.js');
-    killAllManagedPtys();
-    logger.log('Killed managed PTYs');
+    const { killAllManagedSessions } = await import('./lib/rc-launcher.js');
+    killAllManagedSessions();
+    logger.log('Killed managed tmux sessions');
 
     // Stop version checker
     const { stopVersionChecker } = await import('./lib/version-checker.js');
@@ -447,6 +447,10 @@ async function onServerReady() {
   logger.log(
     `tofucode v${getCurrentVersion()} running on http://localhost:${config.port}`,
   );
+
+  // Clean up any cc-* tmux sessions left over from a previous server run
+  const { cleanupOrphanedTmuxSessions } = await import('./lib/rc-launcher.js');
+  cleanupOrphanedTmuxSessions();
   if (isAuthDisabled()) {
     logger.log('⚠️  Authentication is DISABLED');
   } else if (!isAuthSetup()) {

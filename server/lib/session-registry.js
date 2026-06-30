@@ -36,6 +36,19 @@ export function readProcStart(pid) {
 }
 
 /**
+ * Returns true if the process exists (signal-0 check only, no PID-reuse guard).
+ * Use when expectedProcStart is unavailable (e.g. startup cleanup, slow-start check).
+ */
+export function isProcessRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns true if pid is alive AND maps to the expected process (not a
  * recycled PID with the same number).
  */
