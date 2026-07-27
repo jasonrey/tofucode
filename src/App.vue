@@ -1,35 +1,18 @@
 <script setup>
-import { onMounted, onUnmounted, provide, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, onUnmounted, provide, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import CommandPalette from './components/CommandPalette.vue';
-import NewProjectModal from './components/NewProjectModal.vue';
 import PwaPrompt from './components/PwaPrompt.vue';
-import SettingsModal from './components/SettingsModal.vue';
-import Sidebar from './components/Sidebar.vue';
+import TabBar from './components/TabBar.vue';
 import { useApi } from './composables/useApi';
 import { useBackButton } from './composables/useBackButton.js';
 
-const { loadInfo } = useApi();
+const { loadInfo, getProjects } = useApi();
 
 const route = useRoute();
+const router = useRouter();
 
-// ── Settings ────────────────────────────────────────────────
-const showSettings = ref(false);
-const settingsInitialTab = ref('general');
-const settings = ref({ debugMode: false });
-
-function openSettings(tab) {
-  settingsInitialTab.value = tab || 'general';
-  showSettings.value = true;
-}
-
-function closeSettings() {
-  showSettings.value = false;
-}
-
-useBackButton(showSettings, closeSettings, { mobileOnly: true });
-
-// ── Command palette (search) ────────────────────────────────
+// ── Command palette (full-text session search) ──────────────
 const showPalette = ref(false);
 
 function openPalette() {
@@ -40,74 +23,21 @@ function closePalette() {
   showPalette.value = false;
 }
 
-// ── New project modal ───────────────────────────────────────
-const showNewProject = ref(false);
-
-function openNewProject() {
-  showNewProject.value = true;
-}
-
-function closeNewProject() {
-  showNewProject.value = false;
-}
-
-useBackButton(showNewProject, closeNewProject, { mobileOnly: true });
-
-provide('newProject', { open: openNewProject });
-
-// ── Sidebar ─────────────────────────────────────────────────
-// Single breakpoint: >1024px = grid column, ≤1024px = overlay
-const desktopMq = window.matchMedia('(min-width: 1025px)');
-const isDesktop = ref(desktopMq.matches);
-function onMqChange(e) {
-  isDesktop.value = e.matches;
-  if (!e.matches) closeSidebar();
-}
-desktopMq.addEventListener('change', onMqChange);
-
-const sidebarOpen = ref(
-  isDesktop.value ? localStorage.getItem('sidebarOpen') !== 'false' : false,
-);
-
-function toggleSidebar() {
-  sidebarOpen.value = !sidebarOpen.value;
-  localStorage.setItem('sidebarOpen', String(sidebarOpen.value));
-}
-
-function openSidebar() {
-  sidebarOpen.value = true;
-  localStorage.setItem('sidebarOpen', 'true');
-}
-
-function closeSidebar() {
-  sidebarOpen.value = false;
-  localStorage.setItem('sidebarOpen', 'false');
-}
-
-const { consumeSentinel } = useBackButton(sidebarOpen, closeSidebar, {
+const { consumeSentinel } = useBackButton(showPalette, closePalette, {
   mobileOnly: true,
 });
 
-// Close overlay sidebar on navigation (mobile/tablet)
-watch(route, () => {
-  if (!isDesktop.value && sidebarOpen.value) {
-    consumeSentinel();
-    closeSidebar();
-  }
-});
+// The palette emits its target instead of pushing itself: the back-button
+// sentinel must be consumed here first, otherwise the history.back() that
+// closes the overlay races with — and cancels — the pending navigation.
+function navigateFromPalette(to) {
+  consumeSentinel();
+  showPalette.value = false;
+  router.push(to);
+}
 
-provide('sidebar', {
-  open: sidebarOpen,
-  isDesktop,
-  toggle: toggleSidebar,
-  openSidebar,
-  close: closeSidebar,
-});
-
-provide('settings', {
-  settings,
-  debugMode: () => settings.value.debugMode,
-});
+// Views without a keyboard (mobile) reach search through this.
+provide('palette', { open: openPalette });
 
 // ── Keyboard shortcuts ──────────────────────────────────────
 function handleGlobalKeydown(e) {
@@ -115,42 +45,34 @@ function handleGlobalKeydown(e) {
   if (e.key === 'k') {
     e.preventDefault();
     openPalette();
-  } else if (e.key === 'b') {
-    e.preventDefault();
-    toggleSidebar();
-  } else if (e.key === ',') {
-    e.preventDefault();
-    openSettings('general');
   }
 }
 
 const isAuthRoute = () => route.name === 'auth';
+const showTabBar = computed(() => !isAuthRoute());
 
 onMounted(() => {
-  if (!isAuthRoute()) loadInfo();
+  if (!isAuthRoute()) {
+    loadInfo();
+    // Warms the folder list that LiveView's name lookup and the Recent tab
+    // both read, so a cold deep-link to either resolves names immediately.
+    getProjects();
+  }
   document.addEventListener('keydown', handleGlobalKeydown);
 });
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown);
-  desktopMq.removeEventListener('change', onMqChange);
 });
 </script>
 
 <template>
-  <div class="app" :class="{ 'sidebar-open': sidebarOpen && isDesktop }">
-    <Sidebar v-if="route.name !== 'auth'" :open="sidebarOpen" @close="closeSidebar" @open-settings="openSettings" />
+  <div class="app" :class="{ 'has-tabbar': showTabBar }">
     <div class="app-main">
       <router-view />
     </div>
-    <CommandPalette :show="showPalette" @close="closePalette" />
-    <NewProjectModal :show="showNewProject" @close="closeNewProject" />
-    <SettingsModal
-      :show="showSettings"
-      :settings="settings"
-      :initial-tab="settingsInitialTab"
-      @close="closeSettings"
-    />
+    <TabBar v-if="showTabBar" />
+    <CommandPalette :show="showPalette" @close="closePalette" @navigate="navigateFromPalette" />
     <PwaPrompt />
   </div>
 </template>
@@ -158,13 +80,17 @@ onUnmounted(() => {
 <style scoped>
 .app {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-rows: 1fr auto;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  /* How much fixed chrome sits at the bottom — read by overlays like PwaPrompt
+     so they clear the tab bar, and collapse to 0 on /auth where it's absent. */
+  --chrome-bottom: 0px;
 }
 
-.app.sidebar-open {
-  grid-template-columns: var(--sidebar-width) 1fr;
+.app.has-tabbar {
+  --chrome-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
 }
 
 .app-main {
@@ -174,12 +100,5 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-/* ≤1024px: sidebar is an overlay (positioned by Sidebar.vue), grid stays single column */
-@media (max-width: 1024px) {
-  .app.sidebar-open {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

@@ -1,6 +1,4 @@
 <script setup>
-import { inject } from 'vue';
-
 defineProps({
   title: {
     type: String,
@@ -11,19 +9,13 @@ defineProps({
     default: '',
   },
 });
-
-// Sidebar context provided by App.vue — hamburger self-renders when present
-const sidebar = inject('sidebar', null);
 </script>
 
 <template>
   <header class="app-header">
     <div class="header-left">
-      <button v-if="sidebar" class="hamburger-btn" title="Toggle sidebar (Ctrl+B)" @click="sidebar.toggle()">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 12h18M3 6h18M3 18h18"/>
-        </svg>
-      </button>
+      <!-- Leading affordance (back button, etc.) alongside the default title -->
+      <slot name="leading"></slot>
       <!-- Custom content slot -->
       <slot name="content">
         <!-- Default content: title/subtitle or logo -->
@@ -71,23 +63,6 @@ const sidebar = inject('sidebar', null);
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
-}
-
-.hamburger-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-
-.hamburger-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 .header-content {

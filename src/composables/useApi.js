@@ -30,6 +30,7 @@ const liveBySessionId = computed(() => {
 let rcPollTimer = null;
 let searchController = null;
 let recentSessionsDebounceTimer = null;
+let projectsInFlight = null;
 
 // ── Core fetch helper ───────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
@@ -103,16 +104,23 @@ async function selectProject(slug) {
   }
 }
 
-// Folder list for the sidebar — sorted by recent activity, no session contents.
+// Folder list — sorted by recent activity, no session contents. Several
+// callers fire this independently (App warm-up, RecentView/LiveView on mount,
+// startRcSession), so concurrent calls share one request.
 async function getProjects() {
-  try {
-    const data = await apiFetch('/projects');
-    projects.value = data.projects;
-  } catch (err) {
-    console.error('[useApi] getProjects failed:', err.message);
-  } finally {
-    projectsReady.value = true;
-  }
+  if (projectsInFlight) return projectsInFlight;
+  projectsInFlight = (async () => {
+    try {
+      const data = await apiFetch('/projects');
+      projects.value = data.projects;
+    } catch (err) {
+      console.error('[useApi] getProjects failed:', err.message);
+    } finally {
+      projectsReady.value = true;
+      projectsInFlight = null;
+    }
+  })();
+  return projectsInFlight;
 }
 
 // Lazily load a single project's session list (on sidebar group expand).

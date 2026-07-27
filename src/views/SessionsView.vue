@@ -41,10 +41,19 @@ onMounted(async () => {
   listRcSessions();
 });
 
-// Watch for project changes (when navigating via sidebar)
+// Watch for project changes (arriving from another project's route)
 watch(projectSlug, (newSlug) => {
   if (newSlug) selectProject(newSlug);
 });
+
+// Resolves once selectProject lands — until then projectInfo falls back to the slug
+watch(
+  () => projectInfo.value.name,
+  (name) => {
+    document.title = name ? `${name} · tofucode` : 'tofucode';
+  },
+  { immediate: true },
+);
 
 function selectSession(sessionId) {
   router.push({
@@ -93,10 +102,15 @@ async function handleDeleteSession(sessionId, event) {
 
 <template>
   <div class="sessions-view">
-    <AppHeader
-      :title="projectInfo.name"
-      :subtitle="projectInfo.path"
-    />
+    <AppHeader :title="projectInfo.name" :subtitle="projectInfo.path">
+      <template #leading>
+        <router-link :to="{ name: 'home' }" class="back-btn" title="Back to folders">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
+        </router-link>
+      </template>
+    </AppHeader>
 
     <main class="main">
       <ul class="sessions">
@@ -192,6 +206,23 @@ async function handleDeleteSession(sessionId, event) {
 
 .main {
   padding: 0 16px;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+}
+
+.back-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .sessions {

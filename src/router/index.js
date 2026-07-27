@@ -14,6 +14,21 @@ const routes = [
     component: () => import('../views/FolderView.vue'),
   },
   {
+    path: '/recent',
+    name: 'recent',
+    component: () => import('../views/RecentView.vue'),
+  },
+  {
+    path: '/live',
+    name: 'live',
+    component: () => import('../views/LiveView.vue'),
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('../views/SettingsView.vue'),
+  },
+  {
     path: '/project/:project',
     name: 'sessions',
     component: () => import('../views/SessionsView.vue'),

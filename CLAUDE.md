@@ -41,16 +41,18 @@ tofucode/
 │       └── v2/              # REST API routes (see docs/http-api-v2.md)
 ├── src/
 │   ├── views/
-│   │   ├── FolderView.vue       # Landing (/) — folder browser
+│   │   ├── FolderView.vue       # Tab 1 (/) — folder browser + create
+│   │   ├── RecentView.vue       # Tab 2 (/recent) — sessions grouped by folder
+│   │   ├── LiveView.vue         # Tab 3 (/live) — running sessions + stop
+│   │   ├── SettingsView.vue     # Tab 4 (/settings) — metadata + app/auth actions
 │   │   ├── SessionsView.vue     # /project/:slug — session list + RC controls + delete
 │   │   ├── ChatView.vue         # /project/:slug/session/:id — read-only history + session panel
 │   │   └── AuthView.vue
 │   ├── components/
-│   │   ├── Sidebar.vue              # Recent (grouped by project) | Live tabs
-│   │   ├── SidebarProjectGroup.vue  # Collapsible project + nested sessions
-│   │   ├── FolderBrowser.vue        # Shared dir browser + create-folder (landing + modal)
-│   │   ├── NewProjectModal.vue
-│   │   ├── CommandPalette.vue       # Ctrl+K — cross-session search
+│   │   ├── TabBar.vue               # Persistent bottom nav (4 tabs, live count pill)
+│   │   ├── ProjectGroup.vue         # Collapsible project + nested sessions (RecentView)
+│   │   ├── FolderBrowser.vue        # Shared dir browser + create-folder
+│   │   ├── CommandPalette.vue       # Ctrl+K — full-text search over all transcripts
 │   │   ├── RcBadge.vue / RcControls.vue / RcClaudeLink.vue
 │   │   └── ChatMessages.vue / MessageItem.vue / ToolGroup.vue / ...
 │   ├── composables/useApi.js    # Global singleton HTTP API + useChatApi() per-ChatView
@@ -59,6 +61,14 @@ tofucode/
 ```
 
 ## Key Concepts
+
+### Navigation shell
+`App.vue` is a two-row grid (`1fr auto`, `100dvh`): `<router-view>` above, `<TabBar>` below. The tab bar is a grid row rather than `position: fixed`, so it never overlaps `ChatView`'s session panel and needs no content padding; it reserves `env(safe-area-inset-bottom)` for the iOS home indicator. It renders on every route except `/auth`.
+
+The four tabs are the app's entry points. `SessionsView` and `ChatView` are *not* tabs — they highlight no tab and are reached by drilling in; each carries its own back link. There is no sidebar and no settings modal (both removed in the v2 tab restructure).
+
+### Cross-session search
+`CommandPalette.vue` (Ctrl+K, or the search icon in RecentView's header for touch) is a debounced client over `GET /api/v2/sessions/search`, rendering transcript snippets and match counts. It emits `navigate` rather than pushing routes itself — `App.vue` owns the `useBackButton` sentinel and must consume it before navigating, otherwise the overlay's `history.back()` cancels the pending push.
 
 ### Live session registry
 Every running `claude` process writes `~/.claude/sessions/{pid}.json` (sessionId, cwd, status busy/idle, entrypoint cli/sdk-*, `bridgeSessionId` when the RC bridge is connected). Stale files are never cleaned up by claude — `session-registry.js` validates liveness with `kill(pid, 0)` + `/proc/{pid}/stat` field 22 (`procStart`) to defeat PID reuse.

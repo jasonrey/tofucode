@@ -120,7 +120,8 @@ onMounted(() => {
 <style scoped>
 .pwa-prompt {
   position: fixed;
-  bottom: 20px;
+  /* Clears whatever bottom chrome the shell has (tab bar, or nothing on /auth) */
+  bottom: calc(var(--chrome-bottom, 0px) + 12px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
@@ -216,7 +217,7 @@ onMounted(() => {
 /* Mobile adjustments */
 @media (max-width: 639px) {
   .pwa-prompt {
-    bottom: 10px;
+    bottom: calc(var(--chrome-bottom, 0px) + 8px);
     left: 10px;
     right: 10px;
     transform: none;

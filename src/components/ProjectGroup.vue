@@ -26,10 +26,6 @@ defineProps({
     type: Object,
     default: () => ({}),
   },
-  currentSession: {
-    type: String,
-    default: null,
-  },
   starting: {
     type: Boolean,
     default: false,
@@ -85,7 +81,6 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
         v-for="session in sessions"
         :key="session.sessionId"
         class="session-row"
-        :class="{ active: currentSession === session.sessionId }"
         @click="emit('open-session', session)"
       >
         <span class="session-title truncate">
@@ -117,8 +112,8 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
 .group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
+  gap: 8px;
+  padding: 11px 12px;
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background 0.1s;
@@ -141,7 +136,7 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
 .group-name {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -156,8 +151,8 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   background: transparent;
   border: 1px solid var(--border-color);
@@ -188,8 +183,8 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
 .session-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px 6px 28px;
+  gap: 8px;
+  padding: 9px 12px 9px 32px;
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background 0.1s;
@@ -199,19 +194,11 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
   background: var(--bg-hover);
 }
 
-.session-row.active {
-  background: var(--bg-tertiary);
-}
-
 .session-title {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
-}
-
-.session-row.active .session-title {
-  color: var(--text-primary);
 }
 
 .session-time {
@@ -231,14 +218,14 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px 6px 28px;
-  font-size: 11px;
+  padding: 9px 12px 9px 32px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .view-all-row {
-  padding: 5px 10px 5px 28px;
-  font-size: 11px;
+  padding: 8px 12px 8px 32px;
+  font-size: 12px;
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-md);
