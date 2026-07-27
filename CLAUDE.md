@@ -19,7 +19,7 @@ That changed: the Claude desktop app gained SSH environments, the mobile app gai
 
 - **Frontend**: Vue 3 + Vite + Vue Router (history mode)
 - **Backend**: Express 5 + REST HTTP API (`/api/v2`)
-- **RC spawning**: node-pty (`claude` is an interactive REPL — it exits on detached spawn without a PTY)
+- **RC spawning**: tmux (`claude` is an interactive REPL — it exits on detached spawn without a PTY; a detached tmux window supplies one)
 
 ## Project Structure
 
@@ -31,7 +31,7 @@ tofucode/
 │   ├── lib/
 │   │   ├── api-auth.js          # requireAuth Express middleware (cookie-based)
 │   │   ├── session-registry.js  # Read-only view of ~/.claude/sessions/{pid}.json
-│   │   ├── rc-launcher.js       # Idempotent spawn/stop of claude --rc via node-pty
+│   │   ├── rc-launcher.js       # Idempotent spawn/stop of claude --rc via tmux
 │   │   ├── session-search.js    # Streaming JSONL full-text search
 │   │   ├── sessions.js          # JSONL parsing, history pagination
 │   │   ├── recent-sessions.js   # Cross-project recent sessions scan
@@ -74,7 +74,9 @@ The four tabs are the app's entry points. `SessionsView` and `ChatView` are *not
 Every running `claude` process writes `~/.claude/sessions/{pid}.json` (sessionId, cwd, status busy/idle, entrypoint cli/sdk-*, `bridgeSessionId` when the RC bridge is connected). Stale files are never cleaned up by claude — `session-registry.js` validates liveness with `kill(pid, 0)` + `/proc/{pid}/stat` field 22 (`procStart`) to defeat PID reuse.
 
 ### RC launcher
-`rc-launcher.js` spawns `claude --resume <id>` / `--session-id <uuid>` under node-pty, polls the registry to confirm startup, and serializes concurrent starts per (project, session). Spawns default to `--dangerously-skip-permissions`. **Prerequisite**: `remoteControlAtStartup: true` in `~/.claude/settings.json` so all sessions register for RC. `stopSession` re-validates procStart before killing.
+`rc-launcher.js` spawns `claude --resume <id>` / `--session-id <uuid>` inside a **detached tmux session** named `cc-<first8ofSessionId>` — the tmux pane supplies the PTY the REPL needs to stay alive. The pane runs `claude` via `exec`, so the shell is replaced and `#{pane_pid}` *is* the claude PID (no shell child to hunt). It then polls the registry to confirm startup (max 8s, extended while the process is still alive) and serializes concurrent starts per (project, session). Spawns default to `--dangerously-skip-permissions`. **Prerequisite**: `remoteControlAtStartup: true` in `~/.claude/settings.json` so all sessions register for RC. `stopSession` re-validates procStart before `SIGTERM`→`SIGKILL` to avoid murdering a recycled PID.
+
+**SSH fallback**: `tmux attach -t cc-<first8ofSessionId>` from any SSH session drops you into a running session for manual intervention, bypassing tofucode entirely.
 
 ### Remote URL
 `https://claude.ai/code/{bridgeSessionId}` — built from the registry's `bridgeSessionId` (NOT the local session UUID). Only live while the process runs and the bridge is connected (`rcActive`). Rendered by `RcClaudeLink.vue`.
