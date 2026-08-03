@@ -13,9 +13,19 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // Show a ＋ launcher on the current folder and every row
+  allowStart: {
+    type: Boolean,
+    default: false,
+  },
+  // Path whose session spawn is in flight — drives the row spinner
+  startingPath: {
+    type: String,
+    default: null,
+  },
 });
 
-const emit = defineEmits(['select-folder', 'created']);
+const emit = defineEmits(['select-folder', 'created', 'start-session']);
 
 const {
   browseFolder,
@@ -138,6 +148,21 @@ async function confirmCreate() {
       <button class="select-btn" @click="selectCurrent">
         {{ selectLabel }}
       </button>
+      <button
+        v-if="allowStart"
+        class="start-btn"
+        :disabled="!currentFolder || !!startingPath"
+        :title="startingPath === currentFolder ? 'Starting…' : 'Start a session in this folder'"
+        @click="emit('start-session', currentFolder)"
+      >
+        <svg v-if="startingPath === currentFolder" class="spin" width="13" height="13" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+        </svg>
+        <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Directory listing — click drills into the folder -->
@@ -151,7 +176,22 @@ async function confirmCreate() {
         <svg class="folder-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
-        <span class="folder-name">{{ item.name }}</span>
+        <span class="folder-name truncate">{{ item.name }}</span>
+        <button
+          v-if="allowStart"
+          class="row-start-btn"
+          :disabled="!!startingPath"
+          :title="startingPath === item.path ? 'Starting…' : `Start a session in ${item.name}`"
+          @click.stop="emit('start-session', item.path)"
+        >
+          <svg v-if="startingPath === item.path" class="spin" width="13" height="13" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+          </svg>
+          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
         <svg class="folder-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 18l6-6-6-6"/>
         </svg>
@@ -333,6 +373,37 @@ async function confirmCreate() {
 .folder-arrow {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+
+/* ＋ launchers — on the breadcrumb bar (current folder) and on each row */
+.start-btn,
+.row-start-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.start-btn:hover:not(:disabled),
+.row-start-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.start-btn:disabled,
+.row-start-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .folder-empty {

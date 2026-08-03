@@ -30,9 +30,21 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  // Session ids with an in-flight start/stop — reactive Set from the parent
+  pendingSessions: {
+    type: Object,
+    default: () => new Set(),
+  },
 });
 
-const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
+const emit = defineEmits([
+  'toggle',
+  'new-session',
+  'open-session',
+  'view-all',
+  'start-session',
+  'stop-session',
+]);
 </script>
 
 <template>
@@ -96,6 +108,24 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
           <code class="session-id-short">{{ session.sessionId.slice(0, 8) }}</code>
         </template>
         <span v-else class="session-time">{{ formatRelativeTime(session.modified) }}</span>
+        <!-- Always rendered, never hover-gated — this is the mobile affordance -->
+        <button
+          class="session-rc-btn"
+          :class="{ stop: !!liveBySessionId[session.sessionId] }"
+          :disabled="pendingSessions.has(session.sessionId)"
+          :title="liveBySessionId[session.sessionId] ? 'Stop session' : 'Resume session'"
+          @click.stop="emit(liveBySessionId[session.sessionId] ? 'stop-session' : 'start-session', session)"
+        >
+          <svg v-if="pendingSessions.has(session.sessionId)" class="spin" width="12" height="12" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+          </svg>
+          <svg v-else-if="liveBySessionId[session.sessionId]" width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="5" y="5" width="14" height="14" rx="2"/>
+          </svg>
+          <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 4.5v15l13-7.5z"/>
+          </svg>
+        </button>
       </li>
       <li class="view-all-row" @click="emit('view-all')">
         View all →
@@ -212,6 +242,39 @@ const emit = defineEmits(['toggle', 'new-session', 'open-session', 'view-all']);
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
+}
+
+.session-rc-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.session-rc-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.session-rc-btn.stop:hover:not(:disabled) {
+  color: var(--error-color);
+  border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+  background: color-mix(in srgb, var(--error-color) 12%, transparent);
+}
+
+.session-rc-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .session-loading {

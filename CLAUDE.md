@@ -32,6 +32,7 @@ tofucode/
 │   │   ├── api-auth.js          # requireAuth Express middleware (cookie-based)
 │   │   ├── session-registry.js  # Read-only view of ~/.claude/sessions/{pid}.json
 │   │   ├── rc-launcher.js       # Idempotent spawn/stop of claude --rc via tmux
+│   │   ├── claude-config.js     # Pre-seeds workspace trust in ~/.claude.json
 │   │   ├── session-search.js    # Streaming JSONL full-text search
 │   │   ├── sessions.js          # JSONL parsing, history pagination
 │   │   ├── recent-sessions.js   # Cross-project recent sessions scan
@@ -75,6 +76,8 @@ Every running `claude` process writes `~/.claude/sessions/{pid}.json` (sessionId
 
 ### RC launcher
 `rc-launcher.js` spawns `claude --resume <id>` / `--session-id <uuid>` inside a **detached tmux session** named `cc-<first8ofSessionId>` — the tmux pane supplies the PTY the REPL needs to stay alive. The pane runs `claude` via `exec`, so the shell is replaced and `#{pane_pid}` *is* the claude PID (no shell child to hunt). It then polls the registry to confirm startup (max 8s, extended while the process is still alive) and serializes concurrent starts per (project, session). Spawns default to `--dangerously-skip-permissions`. **Prerequisite**: `remoteControlAtStartup: true` in `~/.claude/settings.json` so all sessions register for RC. `stopSession` re-validates procStart before `SIGTERM`→`SIGKILL` to avoid murdering a recycled PID.
+
+**Workspace trust**: the first time `claude` opens a directory it shows a blocking "Is this a project you trust?" prompt — `--dangerously-skip-permissions` does *not* skip it. A detached pane would park there forever and never register, so `claude-config.js:ensureProjectTrusted(cwd)` pre-seeds `hasTrustDialogAccepted: true` in `~/.claude.json` before every spawn. This is what lets the Folders tab launch into directories claude has never seen. It writes **only when the path has no entry at all** — claude runs fine in projects whose flag is still `false`, so touching those would be a pointless mutation and would override a previous "No, exit". Writes go via temp-file + rename so a crash can't truncate claude's config. Starting a session from tofucode *is* the trust decision.
 
 **SSH fallback**: `tmux attach -t cc-<first8ofSessionId>` from any SSH session drops you into a running session for manual intervention, bypassing tofucode entirely.
 

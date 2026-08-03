@@ -15,6 +15,8 @@ const {
   loadProjectSessions,
   listRcSessions,
   startNewRcSession,
+  startRcSession,
+  stopRcSession,
 } = useApi();
 
 const palette = inject('palette', null);
@@ -90,6 +92,43 @@ function viewAll(group) {
   router.push({ name: 'sessions', params: { project: group.slug } });
 }
 
+// ── Per-session resume / stop ───────────────────────────────
+// Row-level so a session can be woken or killed without opening it first.
+const pendingSessions = reactive(new Set());
+
+async function resumeSession(group, session) {
+  const id = session.sessionId;
+  if (pendingSessions.has(id)) return;
+  pendingSessions.add(id);
+  try {
+    const result = await startRcSession({
+      projectSlug: group.slug,
+      sessionId: id,
+      allowFallbackToNew: false,
+    });
+    if (result.status === 'failed') {
+      alert(result.message || 'Failed to resume session');
+    }
+  } catch (err) {
+    alert(`Failed to resume session: ${err.message}`);
+  } finally {
+    pendingSessions.delete(id);
+  }
+}
+
+async function stopSession(session) {
+  const id = session.sessionId;
+  if (pendingSessions.has(id)) return;
+  pendingSessions.add(id);
+  try {
+    await stopRcSession({ sessionId: id });
+  } catch (err) {
+    alert(`Failed to stop session: ${err.message}`);
+  } finally {
+    pendingSessions.delete(id);
+  }
+}
+
 // ── Data fetching ───────────────────────────────────────────
 // This view is the app's refresh pump: without the force-refresh, sessions
 // created outside tofucode never appear and counts drift from the rows.
@@ -133,9 +172,12 @@ onMounted(() => {
           :expanded="expanded.has(group.slug)"
           :live-by-session-id="liveBySessionId"
           :starting="startingSlug === group.slug"
+          :pending-sessions="pendingSessions"
           @toggle="toggleGroup(group.slug)"
           @new-session="startNewSession(group)"
           @open-session="(session) => openSession(group, session)"
+          @start-session="(session) => resumeSession(group, session)"
+          @stop-session="stopSession"
           @view-all="viewAll(group)"
         />
       </ul>

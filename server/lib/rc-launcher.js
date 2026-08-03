@@ -24,6 +24,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToSlug, slugToPath } from '../config.js';
+import { ensureProjectTrusted } from './claude-config.js';
 import { logger } from './logger.js';
 import {
   findLiveBySessionId,
@@ -114,6 +115,19 @@ function killTmuxSession(name) {
     execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' });
   } catch {
     // Session already gone — not an error
+  }
+}
+
+/** Snapshot a pane's visible text, for diagnosing a spawn that never registered. */
+function capturePane(name) {
+  try {
+    return execFileSync('tmux', ['capture-pane', '-t', name, '-p'], {
+      encoding: 'utf8',
+    })
+      .replace(/\n{2,}/g, '\n')
+      .trim();
+  } catch {
+    return null;
   }
 }
 
@@ -239,6 +253,10 @@ async function _startSession({
     };
   }
 
+  // Starting a session here is itself the trust decision — pre-seed the flag so
+  // claude doesn't park on its first-run trust prompt with nobody to answer it.
+  ensureProjectTrusted(cwd);
+
   // 2. Session ID given → resume path
   if (sessionId) {
     if (!isValidUUID(sessionId)) {
@@ -328,8 +346,23 @@ async function _spawnNew({ cwd, name, model, skipPermissions }) {
   const entry = await waitForRegistryWithExtension(pid);
 
   if (!entry) {
+    // Distinguish "died" from "still alive but stuck" — the latter means claude
+    // is sitting on an interactive prompt nobody can answer, which reads very
+    // differently to the user than a crash.
+    const stuck = isProcessRunning(pid);
+    const pane = stuck ? capturePane(tname) : null;
     killTmuxSession(tname);
     activeTmuxSessions.delete(tname);
+    if (stuck) {
+      logger.error(
+        `[rc-launcher] pid=${pid} never registered; pane tail: ${pane?.slice(-300) ?? '(unavailable)'}`,
+      );
+      return {
+        status: 'failed',
+        message:
+          'Spawn failed: claude started but never became ready — it may be waiting on a prompt. Try running `claude` in this folder once from a terminal.',
+      };
+    }
     return {
       status: 'failed',
       message: 'Spawn failed: process exited without writing registry entry',

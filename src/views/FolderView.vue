@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import FolderBrowser from '../components/FolderBrowser.vue';
@@ -7,7 +7,7 @@ import { useApi } from '../composables/useApi';
 import { pathToSlug } from '../utils/slug.js';
 
 const router = useRouter();
-const { browseFolder, currentFolder, rootPath } = useApi();
+const { browseFolder, currentFolder, rootPath, startNewRcSession } = useApi();
 
 function openFolder(path) {
   router.push({ name: 'sessions', params: { project: pathToSlug(path) } });
@@ -15,6 +15,31 @@ function openFolder(path) {
 
 function onCreated(projectSlug) {
   router.push({ name: 'sessions', params: { project: projectSlug } });
+}
+
+// Launch straight from the browser — the folder needs no prior session history,
+// the server resolves the slug back to a real directory on disk.
+const startingPath = ref(null);
+
+async function startSession(path) {
+  if (!path || startingPath.value) return;
+  startingPath.value = path;
+  try {
+    const slug = pathToSlug(path);
+    const result = await startNewRcSession(slug);
+    if (result.sessionId) {
+      router.push({
+        name: 'chat',
+        params: { project: slug, session: result.sessionId },
+      });
+    } else {
+      alert(result.message || 'Failed to start session');
+    }
+  } catch (err) {
+    alert(`Failed to start session: ${err.message}`);
+  } finally {
+    startingPath.value = null;
+  }
 }
 
 onMounted(() => {
@@ -40,8 +65,11 @@ onMounted(() => {
       <FolderBrowser
         select-label="View sessions"
         allow-create
+        allow-start
+        :starting-path="startingPath"
         @select-folder="openFolder"
         @created="onCreated"
+        @start-session="startSession"
       />
     </div>
   </div>
